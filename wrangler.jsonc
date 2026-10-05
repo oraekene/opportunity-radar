@@ -1,0 +1,48 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "opportunity-radar",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "baadb8542499ad04ed9e0432215f3fb6",
+  "triggers": {
+    "crons": [
+      "0 */8 * * *" // Runs 3 times daily (every 8 hours: 00:00, 08:00, 16:00 UTC) as a single cron trigger
+    ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "SEEN_OPPORTUNITIES",
+      "id": "f7f0f9c134f949089d74cdc19ebe9d0b"
+    }
+  ],
+  "vars": {
+    // Delivery Channel Settings (auto_router, whatsapp_kapso, whatsapp_meta, whatsapp_twilio, telegram, whatsapp_callmebot)
+    "NOTIFIER_TARGET": "auto_router",
+    
+    // Kapso.ai Gateway (2,000 Free Messages/Month)
+    "KAPSO_API_KEY": "",
+    "KAPSO_PHONE_NUMBER_ID": "",
+    "KAPSO_RECIPIENT_PHONE": "",
+
+    // Meta Official Cloud API (1,000 Free Messages/Month)
+    "META_PHONE_NUMBER_ID": "",
+    "META_ACCESS_TOKEN": "",
+    "META_RECIPIENT_PHONE": "",
+
+    // CallMeBot (Personal WhatsApp)
+    "CALLMEBOT_PHONE": "",
+    "CALLMEBOT_APIKEY": "",
+    
+    // Green-API (Optional: for sending to separate WhatsApp group IDs)
+    "GREENAPI_INSTANCE_ID": "",
+    "GREENAPI_API_TOKEN": "",
+    
+    // Telegram (Optional: for sending to individual Topics in a Supergroup)
+    "TELEGRAM_BOT_TOKEN": "",
+    "TELEGRAM_CHAT_ID": "",
+    
+    // Discord (Optional: Webhook URL)
+    "DISCORD_WEBHOOK_URL": ""
+  }
+}

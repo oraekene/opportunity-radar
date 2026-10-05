@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Cloudflare & Build Artifacts
+.wrangler/
+.dev.vars
+dist/
+*.log
+
+# Excluded Subdirectories per user specification
+cloudflare_docs/
+fork_readmes/
+github_export/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
