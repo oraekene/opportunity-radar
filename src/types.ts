@@ -21,7 +21,7 @@ export interface FeedSource {
   id: string;
   name: string;
   url: string;
-  type?: "rss" | "html";
+  type?: "rss" | "html" | "json";
 }
 
 export interface CategoryDefinition {

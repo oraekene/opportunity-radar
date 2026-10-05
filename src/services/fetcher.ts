@@ -84,11 +84,48 @@ function parseBreakoutListHtml(htmlText: string, sourceName: string): RawFeedIte
   return items;
 }
 
+async function fetchSomewhereJobs(source: FeedSource, controllerSignal?: AbortSignal): Promise<RawFeedItem[]> {
+  try {
+    const input = encodeURIComponent(JSON.stringify({ "0": { json: { query: "", industries: [], isSourcingUnit: null, countries: [] } } }));
+    const url = `https://salarycalculator.somewheretypingtest.com/api/trpc/jobs.getJobs?batch=1&input=${input}`;
+    const res = await fetch(url, {
+      signal: controllerSignal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OpportunityRadar/1.0",
+        "Accept": "application/json"
+      }
+    });
+    if (!res.ok) return [];
+    const data = await res.json() as any;
+    const jobs = data?.[0]?.result?.data?.json?.jobs || [];
+
+    return jobs.map((j: any) => {
+      const title = j.name ? `${cleanHtml(j.name)}${j.country ? ` (${j.country})` : ""}` : "Remote Opportunity";
+      const link = j.slug ? `https://recruitcrm.io/apply/${j.slug}` : "https://somewhere.com/jobs";
+      const desc = cleanHtml(j.job_description_text || "");
+      return {
+        title,
+        link,
+        pubDate: new Date().toUTCString(),
+        description: desc.substring(0, 1000) || "Remote opportunity on Somewhere.com",
+        sourceName: source.name
+      };
+    });
+  } catch (err: any) {
+    console.error(`[Fetcher] Failed to fetch Somewhere jobs:`, err);
+    return [];
+  }
+}
+
 export async function fetchFeedItems(source: FeedSource): Promise<RawFeedItem[]> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12000); // 12-second timeout
 
   try {
+    if (source.type === "json" || source.url.includes("somewhere.com") || source.url.includes("somewheretypingtest.com")) {
+      return await fetchSomewhereJobs(source, controller.signal);
+    }
+
     const res = await fetch(source.url, {
       signal: controller.signal,
       headers: {

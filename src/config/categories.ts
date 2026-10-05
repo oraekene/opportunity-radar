@@ -237,6 +237,12 @@ export const CATEGORIES: CategoryDefinition[] = [
         url: "https://weworkremotely.com/categories/remote-product-management-jobs.rss"
       },
       {
+        id: "somewhere_jobs",
+        name: "Somewhere.com Jobs",
+        url: "https://somewhere.com/jobs",
+        type: "json"
+      },
+      {
         id: "remote_ok",
         name: "RemoteOK",
         url: "https://remoteok.com/remote-jobs.rss"
@@ -249,10 +255,10 @@ export const CATEGORIES: CategoryDefinition[] = [
     ],
     keywords: {
       include: [
-        /\b(remote|anywhere|worldwide|global|emea)\b/i,
+        /\b(remote|anywhere|worldwide|global|emea|latam|africa|south africa)\b/i,
         /\b(product manager|product management|pm|project manager)\b/i,
         /\b(ai engineer|machine learning|llm|software engineer|developer|founding engineer)\b/i,
-        /\b(credit|risk|fintech|banking|underwriting|operations|growth|chief of staff)\b/i,
+        /\b(credit|risk|fintech|banking|underwriting|operations|growth|chief of staff|analyst|controller|assistant|drafter)\b/i,
         /\b(policy|compliance|governance|ethics)\b/i
       ],
       exclude: [
