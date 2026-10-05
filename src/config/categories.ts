@@ -125,13 +125,29 @@ export const CATEGORIES: CategoryDefinition[] = [
         id: "techstars_news",
         name: "Techstars News",
         url: "https://www.techstars.com/newsroom/rss.xml"
+      },
+      {
+        id: "founders_you_should_know",
+        name: "Founders You Should Know",
+        url: "https://newsletter.foundersysk.com/feed"
+      },
+      {
+        id: "breakout_list",
+        name: "Breakout List",
+        url: "https://breakoutlist.com",
+        type: "html"
+      },
+      {
+        id: "ramp_builders",
+        name: "Ramp Builders & Spend",
+        url: "https://builders.ramp.com/rss.xml"
       }
     ],
     keywords: {
       include: [
         /\b(angel|pre-seed|seed|funding|accelerator|incubator|venture capital|vc)\b/i,
         /\b(call for applications|applications open|cohort|pitch to investors)\b/i,
-        /\b(startup|founders|equity|capital|fund|investment)\b/i,
+        /\b(startup|founders|equity|capital|fund|investment|breakout|series a|series b)\b/i,
         /\b(africa|fintech|ai|climate tech|saas|healthtech)\b/i
       ],
       exclude: [
@@ -160,6 +176,11 @@ export const CATEGORIES: CategoryDefinition[] = [
         id: "remotive",
         name: "Remotive - All Jobs",
         url: "https://remotive.com/job/rss"
+      },
+      {
+        id: "hn_freelance",
+        name: "HN Seeking Freelancer",
+        url: "https://hnrss.org/whoishiring/freelance"
       }
     ],
     keywords: {
@@ -180,6 +201,31 @@ export const CATEGORIES: CategoryDefinition[] = [
     displayName: "Remote Tech & Product Jobs",
     icon: "🌍",
     sources: [
+      {
+        id: "yc_jobs",
+        name: "Y Combinator & HN Jobs",
+        url: "https://hnrss.org/jobs"
+      },
+      {
+        id: "hn_who_is_hiring",
+        name: "Hacker News - Who's Hiring",
+        url: "https://hnrss.org/whoishiring/jobs"
+      },
+      {
+        id: "lennys_jobs",
+        name: "Lenny's Jobs & Newsletter",
+        url: "https://www.lennysnewsletter.com/feed"
+      },
+      {
+        id: "a16z_build",
+        name: "a16z Build & Jobs (Cosign)",
+        url: "https://a16zjobs.substack.com/feed"
+      },
+      {
+        id: "next_play",
+        name: "Next Play Newsletter",
+        url: "https://nextplayso.substack.com/feed"
+      },
       {
         id: "wwr_programming",
         name: "We Work Remotely - Programming",
@@ -205,8 +251,8 @@ export const CATEGORIES: CategoryDefinition[] = [
       include: [
         /\b(remote|anywhere|worldwide|global|emea)\b/i,
         /\b(product manager|product management|pm|project manager)\b/i,
-        /\b(ai engineer|machine learning|llm|software engineer|developer)\b/i,
-        /\b(credit|risk|fintech|banking|underwriting|operations)\b/i,
+        /\b(ai engineer|machine learning|llm|software engineer|developer|founding engineer)\b/i,
+        /\b(credit|risk|fintech|banking|underwriting|operations|growth|chief of staff)\b/i,
         /\b(policy|compliance|governance|ethics)\b/i
       ],
       exclude: [
