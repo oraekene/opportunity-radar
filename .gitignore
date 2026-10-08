@@ -16,3 +16,9 @@ github_export/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Calibration sweep scratch output (regenerate with npm run calibrate)
+.calib.mjs
+.calibration.txt
+.dashboard-check.js
+.harness.cjs
