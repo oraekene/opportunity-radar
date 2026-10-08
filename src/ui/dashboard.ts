@@ -1,14 +1,18 @@
 import { CATEGORIES } from "../config/categories";
 import { UserSettings } from "../types";
-import { ELIGIBILITY_FIELDS } from "../services/eligibility";
+import { ELIGIBILITY_FIELDS, TOP_ELIGIBILITY_FIELDS, ADVANCED_ELIGIBILITY_FIELDS } from "../services/eligibility";
 
 export function renderDashboardHtml(settings: UserSettings, availableDates: string[], consumedKeys: string[] = []): string {
   const categoriesJson = JSON.stringify(CATEGORIES);
   const settingsJson = JSON.stringify(settings);
   const datesJson = JSON.stringify(availableDates);
   const consumedJson = JSON.stringify(consumedKeys);
-  // documentsHeld is an answer, not a requirement, so it joins the editor.
+  // documentsHeld is an answer, not a requirement, so it joins the advanced editor.
   const eligibilityFieldsJson = JSON.stringify([...ELIGIBILITY_FIELDS, "documentsHeld"]);
+  // The four shown directly; everything else, plus the documentsHeld answer field, sits
+  // under Advanced Settings.
+  const topEligibilityFieldsJson = JSON.stringify([...TOP_ELIGIBILITY_FIELDS]);
+  const advancedEligibilityFieldsJson = JSON.stringify([...ADVANCED_ELIGIBILITY_FIELDS, "documentsHeld"]);
 
   return `<!DOCTYPE html>
 <html lang="en" class="h-full bg-slate-900 text-slate-100">
@@ -557,7 +561,7 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
           <!-- Eligibility Profile: your own answers, per field toggleable -->
           <details class="border border-slate-800 rounded-lg bg-slate-900/40 overflow-hidden">
             <summary class="px-4 py-3 bg-slate-900 hover:bg-slate-850 cursor-pointer flex items-center justify-between text-xs font-semibold text-emerald-400 select-none">
-              <span>🎯 Your Eligibility Profile — 7 parameters, each toggleable</span>
+              <span>🎯 Your Eligibility Profile — 4 core parameters, ${ELIGIBILITY_FIELDS.length} in total</span>
               <span class="text-slate-500 text-[10px]">nothing is enforced until you say so</span>
             </summary>
             <div class="p-4 space-y-3">
@@ -578,6 +582,32 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
                   <tbody id="eligibility-profile-body"></tbody>
                 </table>
               </div>
+
+              <!-- Everything else. Same rows, same toggles, hidden until asked for. -->
+              <details class="border border-slate-800 rounded bg-slate-950/60 overflow-hidden">
+                <summary class="px-3 py-2 cursor-pointer flex items-center justify-between text-[11px] font-semibold text-slate-400 hover:text-slate-200 select-none">
+                  <span>⚙️ Advanced Settings</span>
+                  <span class="text-slate-600 text-[10px]">${ADVANCED_ELIGIBILITY_FIELDS.length} more parameter(s)</span>
+                </summary>
+                <div class="p-3 space-y-2">
+                  <p class="text-[10px] text-slate-500 leading-relaxed">
+                    Gates that decide an application just as hard as the four above, but that apply to fewer calls.
+                    They are off the main list, not off the record: they extract, they show, and they enforce on the same terms.
+                  </p>
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-[11px]">
+                      <thead>
+                        <tr class="text-slate-500 text-left">
+                          <th class="py-1.5 pr-2 font-medium">Parameter</th>
+                          <th class="py-1.5 pr-2 font-medium">Your answer</th>
+                          <th class="py-1.5 font-medium">Enforcement</th>
+                        </tr>
+                      </thead>
+                      <tbody id="eligibility-advanced-body"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </details>
             </div>
           </details>
 
@@ -617,25 +647,24 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
     let ALL_OPPORTUNITIES = [];
 
     const ELIGIBILITY_FIELDS = ${eligibilityFieldsJson};
+    const TOP_ELIGIBILITY_FIELDS = ${topEligibilityFieldsJson};
+    const ADVANCED_ELIGIBILITY_FIELDS = ${advancedEligibilityFieldsJson};
     const ELIGIBILITY_MODES = ["enforce", "warn", "ignore"];
 
     function eligibilityProfile() {
       return CURRENT_SETTINGS.eligibilityProfile || { enforcement: {} };
     }
 
-    function populateEligibilityProfile() {
-      const body = document.getElementById("eligibility-profile-body");
-      if (!body) return;
+    function eligibilityRow(f) {
       const p = eligibilityProfile();
-      body.innerHTML = ELIGIBILITY_FIELDS.map(f => {
-        const mode = (p.enforcement && p.enforcement[f]) || "warn";
-        const value = f === "documentsHeld" ? (p.documentsHeld || "") : (p[f] !== undefined && p[f] !== null ? p[f] : "");
-        const inputType = f === "yearsExperience" ? "number" : "text";
-        const options = ELIGIBILITY_MODES.map(m =>
-          \`<option value="\${m}" \${m === mode ? "selected" : ""}>\${m}</option>\`
-        ).join("");
-        const modeColor = mode === "enforce" ? "rose" : mode === "ignore" ? "slate" : "amber";
-        return \`<tr class="border-t border-slate-800/70">
+      const mode = (p.enforcement && p.enforcement[f]) || "warn";
+      const value = f === "documentsHeld" ? (p.documentsHeld || "") : (p[f] !== undefined && p[f] !== null ? p[f] : "");
+      const inputType = f === "yearsExperience" ? "number" : "text";
+      const options = ELIGIBILITY_MODES.map(m =>
+        \`<option value="\${m}" \${m === mode ? "selected" : ""}>\${m}</option>\`
+      ).join("");
+      const modeColor = mode === "enforce" ? "rose" : mode === "ignore" ? "slate" : "amber";
+      return \`<tr class="border-t border-slate-800/70">
           <td class="py-2 pr-2 font-mono text-slate-300">\${f}</td>
           <td class="py-2 pr-2">
             <input type="\${inputType}" data-ep-value="\${f}" value="\${value}" placeholder="unset"
@@ -647,11 +676,17 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
             </select>
           </td>
         </tr>\`;
-      }).join("");
+    }
+
+    function populateEligibilityProfile() {
+      const body = document.getElementById("eligibility-profile-body");
+      const adv = document.getElementById("eligibility-advanced-body");
+      if (body) body.innerHTML = TOP_ELIGIBILITY_FIELDS.map(eligibilityRow).join("");
+      if (adv) adv.innerHTML = ADVANCED_ELIGIBILITY_FIELDS.map(eligibilityRow).join("");
     }
 
     function readEligibilityProfile() {
-      const profile = { enforcement: {}, country: "", ageBand: "", yearsExperience: undefined, educationLevel: "", fieldOfStudy: "", documentsHeld: "" };
+      const profile = { enforcement: {} };
       document.querySelectorAll("[data-ep-mode]").forEach(el => {
         profile.enforcement[el.dataset.epMode] = el.value;
       });

@@ -2,31 +2,79 @@ import type { OpportunityItem } from "../types";
 import { extractDeadline, extractEligibilityCountry } from "./parse.ts";
 
 /**
- * The seven parameters a reviewer states and a candidate has to satisfy.
+ * The parameters a reviewer states and a candidate has to satisfy.
  * Every field is toggleable: "enforce" blocks, "warn" notes it, "ignore" drops
  * it. Nothing is enforced unless you turn it on.
+ *
+ * The list grew from 7 to 18 on 2026-10-08 after 20 full apply pages were read
+ * (grants, fellowships, scholarships, jobs). Those pages carried gates the
+ * original seven had no name for: a women-only rule, an on-site or work
+ * authorisation rule, a "currently enrolled" student-status rule, an
+ * early-career definition, a CGPA floor, an IELTS floor, a weekly-hours
+ * commitment, a companies-only rule and a membership prerequisite.
  */
 export const ELIGIBILITY_FIELDS = [
   "country",
+  "nationality",
+  "residencyOrWorkAuth",
   "ageBand",
-  "yearsExperience",
+  "gender",
   "educationLevel",
+  "enrolmentStatus",
+  "careerStage",
+  "yearsExperience",
+  "academicGrade",
   "fieldOfStudy",
+  "standardisedTest",
+  "language",
+  "workHours",
+  "applicantType",
+  "organisationStatus",
   "requiredDocuments",
   "deadline"
 ] as const;
 
+/**
+ * The four shown directly in Settings; the rest sit under Advanced Settings.
+ * They are the four that most often stated an un-overridable bar, and they
+ * split into the four distinct ways geography and standing get gated: an
+ * eligible-country list, an on-site or work-authorisation rule, an age band or
+ * cap, and a required level of education. Display order only, no weighting.
+ */
+export const TOP_ELIGIBILITY_FIELDS = [
+  "country",
+  "residencyOrWorkAuth",
+  "ageBand",
+  "educationLevel"
+] as const satisfies readonly EligibilityField[];
+
 export type EligibilityField = (typeof ELIGIBILITY_FIELDS)[number];
+
+/** Everything not in TOP_ELIGIBILITY_FIELDS. This is what the accordion holds. */
+export const ADVANCED_ELIGIBILITY_FIELDS = ELIGIBILITY_FIELDS.filter(
+  f => !(TOP_ELIGIBILITY_FIELDS as readonly string[]).includes(f)
+) as readonly EligibilityField[];
 
 export type EnforcementMode = "enforce" | "warn" | "ignore";
 
 /** Every field defaults to warn. The radar notes a requirement, never blocks on it unasked. */
 export const DEFAULT_ENFORCEMENT: Record<EligibilityField, EnforcementMode> = {
   country: "warn",
+  nationality: "warn",
+  residencyOrWorkAuth: "warn",
   ageBand: "warn",
-  yearsExperience: "warn",
+  gender: "warn",
   educationLevel: "warn",
+  enrolmentStatus: "warn",
+  careerStage: "warn",
+  yearsExperience: "warn",
+  academicGrade: "warn",
   fieldOfStudy: "warn",
+  standardisedTest: "warn",
+  language: "warn",
+  workHours: "warn",
+  applicantType: "warn",
+  organisationStatus: "warn",
   requiredDocuments: "warn",
   deadline: "warn"
 };
@@ -36,10 +84,21 @@ export interface EligibilityProfile {
   enforcement: Partial<Record<EligibilityField, EnforcementMode>>;
   /** Your own answers. Empty means unknown, never a guess. */
   country?: string;
+  nationality?: string;
+  residencyOrWorkAuth?: string;
   ageBand?: string;
-  yearsExperience?: number;
+  gender?: string;
   educationLevel?: string;
+  enrolmentStatus?: string;
+  careerStage?: string;
+  yearsExperience?: number;
+  academicGrade?: string;
   fieldOfStudy?: string;
+  standardisedTest?: string;
+  language?: string;
+  workHours?: string;
+  applicantType?: string;
+  organisationStatus?: string;
   documentsHeld?: string;
 }
 
@@ -76,6 +135,33 @@ const AGE_SINGLE_RE = /\b(?:aged?|age)\s*(\d{1,2})\s*(?:and\s*older|or\s*younger
 const UNDER_RE = /\bunder\s*(\d{2})\s*(?:years?\s*old|yrs?)?/i;
 const YEARS_RE = /\b(?:minimum\s*of\s*)?(\d{1,2})\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:professional\s+|relevant\s+|industry\s+|work\s+)?experience/i;
 const MIN_AGE_RE = /\b(?:minimum|at least|not less than)\s*(?:age of\s*)?(\d{2})\s*(?:years?\s*old|yrs?)/i;
+/** "aged 35 or below as at the deadline" and "30 or younger in the year of application". */
+const AGE_CAP_RE = /\baged?\s*(\d{1,2})\s*years?\s*or\s*(?:younger|less|below|under)\b|\b(\d{1,2})\s*years?\s*old\s+or\s*younger\b/i;
+const AGE_YEAR_RE = /\bbe\s*(\d{1,2})\s*years?\s*old\s+or\s*younger\s+in\s+the\s+year\b/i;
+/** A women-only or men-only track. */
+const GENDER_RE = /\b(?:women|female|men|male|girls|boys)[- ]only\b|\bonly\s+(?:women|females|men|males)\b|\b(?:open|for)\s+to\s+women\b|\bfemale\s+(?:researcher|applicants?|students?|candidates?|fellows?)\b|\bwomen\s+aged\b/i;
+/** "US work authorization required." states the gate without ever saying "only". */
+const WORK_AUTH_RE = /\b(?:us|u\.s\.|united states)\s+work\s+authori[sz]ation\s+(?:is\s+)?required\b|\bwork\s+authori[sz]ation\s+required\b|\bmust\s+be\s+(?:a\s+)?(?:u\.s\.|us)\s+citizen\b|\brequire[sd]?\s+(?:a\s+)?security\s+clearance\b/i;
+const ON_SITE_RE = /\bon-?site\b|\bin-?person\b/i;
+/** "early career", "graduate degree no earlier than 2021". */
+const CAREER_STAGE_RE = /\bearly[- ]career\b|\brecent\s+graduat|\bgraduate\s+degree\s+no\s+earlier\s+than\s+\d{4}|\bno\s+earlier\s+than\s+\d{4}\b|\byoung\s+professional|\bfresh\s+graduate/i;
+/** "currently enrolled in an accredited tertiary institution". */
+const ENROLMENT_RE = /\bcurrently\s+enrolled\b|\bmust\s+be\s+enrolled\b|\benrolled\s+in\s+(?:an?\s+)?(?:accredited|eligible|recogni[sz]ed)\b|\b(?:must|should)\s+be\s+(?:currently\s+)?(?:pursuing|studying)\b|\bin\s+candidature\b/i;
+/** Both sides take trailing zeros: "3.70/4.00" must not truncate to "3.7". */
+const GRADE_RE = /\b(?:minimum\s+)?(?:CGPA|GPA)\s*(?:of\s*)?(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/i;
+const TEST_RE = /(?:IELTS|TOEFL)[^.;]{0,30}?(\d+(?:\.\d+)?)|CEFR\s*([ABC][12])/i;
+/** A topic whitelist: thrust areas, tracks, themes, species. */
+const TOPIC_RE = /(?:thrust\s+areas?|disciplines?|fields?\s+of\s+study|special\s+tracks?|theme|focus(?:es)?\s+on|must\s+pursue\s+research\s+within)\s*:?\s*([^.;]{4,120})/i;
+const LANGUAGE_REQ_RE = /(?:application|applications|essay|submissions?)\s+shall\s+be\s+made\s+in\s+([A-Z][a-z]+)|\blanguage\s*:?\s*([A-Z][a-z]+)|\bsubmitted\s+in\s+([A-Z][a-z]+)/i;
+/** A commitment gate: hours, availability, working time. */
+const HOURS_RE = /\b\d{1,2}\s*(?:-\s*\d{1,2}\s*)?h(?:rs?)?\.?\s*\/\s*week\b|\b\d{1,2}\s*(?:-\s*\d{1,2}\s*)?hours?\s+(?:per|a)\s+week\b|\bpart[- ]time\b|\bfull[- ]?time\b|\bmust\s+be\s+available\b|\bfull\s+availability\b/i;
+/** Who may apply at all: companies only, universities only, nonprofits. */
+const APPLICANT_TYPE_RE = /(?:designed\s+for|open\s+to|reserved\s+for)\s+(?:companies|corporates?|non-?profits?|universit(?:y|ies)|organi[sz]ations?|NGOs?|SMEs?|start-?ups?)\b|(?:companies|corporates?|non-?profits?|universit(?:y|ies)|organi[sz]ations?|NGOs?)\s+only\b|\bfor\s+(?:people|professionals?|graduates?|students?|researchers?)\s+(?:working|employed)\b/i;
+/** A prerequisite the applicant already has: membership, registration, affiliation. */
+const ORG_STATUS_RE = /\bparticipants?\s+of\s+the\s+[A-Z][A-Za-z\s]{2,40}|\bmust\s+be\s+(?:a\s+)?(?:registered|member)\b|\brequired\s+to\s+(?:join|be\s+a\s+member)|\b(?:currently\s+)?(?:engaged|affiliated|employed)\s+(?:with|at)\s+(?:a|an|the)\b|\b(?:affiliated|employed)\s+with\s+(?:a|an)\b|\b(?:at|with)\s+a\s+(?:university|college|polytechnic|institute|organi[sz]ation|research\s+cent(?:re|er)|non-?profit|company)\b|\bwilling\s+to\s+join\b/i;
+const NATIONALITY_RE = /\bnationals?\s+of\s+([A-Z][A-Za-z\s,]{2,60})/i;
+/** "8+ years in ML / Data Science" states the gate with no word "experience" near it. */
+const YEARS_IN_RE = /\b(\d{1,2})\+?\s*(?:-\s*\d{1,2}\s*)?years?\s+(?:of\s+)?(?:professional\s+|relevant\s+|industry\s+|work\s+)?(?:in|with|across)\s+[A-Z]/i;
 
 /** The cue phrase plus the date, so a deadline check still has a citation. */
 const DEADLINE_EVIDENCE_RE = /\b(?:deadline|apply by|apply before|closing date|close date|last date|due date|applications? (?:close|closes|are due)|closes? on|submit(?:ted)? by)\s*(?:is|:|-)?\s*(?:on|by|at|until)?\s*[^.;|\n]{4,50}/i;
@@ -96,7 +182,7 @@ const ANCHOR_RE = /\b(eligibility|eligible|who can apply|who is eligible|who may
 
 /** Something a gate actually looks like, not a menu label. */
 const REQUIREMENT_SIGNAL =
-  /\b(\d{1,2}\s*[-–]\s*\d{1,2}\s*years?|years?\s+of\s+experience|degree|cgpa|gpa|documents?|citizen|national|residen\w*|at\s+least|undergraduate|postgraduate|master'?s?|ph\.?d|doctorate|bachelor'?s?|diploma)\b/i;
+  /\b(\d{1,2}\s*[-–]\s*\d{1,2}\s*years?|years?\s+of\s+experience|degree|cgpa|gpa|documents?|citizen|national|residen\w*|at\s+least|undergraduate|postgraduate|master'?s?|ph\.?d|doctorate|bachelor'?s?|diploma|women|female|enrolled|early[- ]career|ielts|toefl|companies|only|membership|work\s+authori[sz]ation|aged?\s*\d{1,2}|\d{1,2}\+?\s*years|english|french|spanish|hours?|\d{1,2}\s*h(?:rs?)?\s*\/\s*week|availability)\b/i;
 
 const SECTION_WINDOW_BEFORE = 400;
 const SECTION_WINDOW_AFTER = 700;
@@ -161,30 +247,66 @@ export function extractRequirements(text: string): Requirement[] {
     if (clean && cite && !out.some(r => r.field === field)) out.push({ field, value: clean, evidence: cite.slice(0, 160) });
   };
 
+  let m: RegExpMatchArray | null;
+
   // Country gate
   const countryGate = findCountryGate(t);
   if (countryGate) push("country", countryGate.value, countryGate.evidence);
 
+  // Nationality. Separate from country because "nationals of ITU member states" is a
+  // passport gate and "residents of Ghana" is a residence gate, and they fail differently.
+  m = t.match(NATIONALITY_RE);
+  if (m) push("nationality", m[1].trim(), m[0]);
+
+  // On-site or work authorisation.
+  if (ON_SITE_RE.test(t)) {
+    push("residencyOrWorkAuth", "on-site", t.match(ON_SITE_RE)![0]);
+  } else if (WORK_AUTH_RE.test(t)) {
+    push("residencyOrWorkAuth", "work authorisation required", t.match(WORK_AUTH_RE)![0]);
+  }
+
   // Age band: "18-25 years old", "aged 18+", "under 21", "minimum age of 18"
-  let m = t.match(AGE_RE);
-  if (m) push("ageBand", `${m[1]}-${m[2]} years old`, m[0]);
+  let m2 = t.match(AGE_RE);
+  if (m2) push("ageBand", `${m2[1]}-${m2[2]} years old`, m2[0]);
 
   if (!out.some(r => r.field === "ageBand")) {
-    m = t.match(UNDER_RE);
-    if (m) push("ageBand", `under ${m[1]} years old`, m[0]);
+    m2 = t.match(UNDER_RE);
+    if (m2) push("ageBand", `under ${m2[1]} years old`, m2[0]);
   }
   if (!out.some(r => r.field === "ageBand")) {
-    m = t.match(MIN_AGE_RE);
-    if (m) push("ageBand", `${m[1]} years old or older`, m[0]);
+    m2 = t.match(MIN_AGE_RE);
+    if (m2) push("ageBand", `${m2[1]} years old or older`, m2[0]);
+  }
+  // An upper cap. Without this, "aged 35 years or below" fell through every pattern above
+  // and the page reported no age gate at all.
+  if (!out.some(r => r.field === "ageBand")) {
+    m2 = t.match(AGE_CAP_RE);
+    if (m2) push("ageBand", `${m2[1] ?? m2[2]} years old or younger`, m2[0]);
   }
   if (!out.some(r => r.field === "ageBand")) {
-    m = t.match(AGE_SINGLE_RE);
-    if (m) push("ageBand", `aged ${m[1]}`, m[0]);
+    m2 = t.match(AGE_YEAR_RE);
+    if (m2) push("ageBand", `${m2[1]} years old or younger in the year of application`, m2[0]);
+  }
+  if (!out.some(r => r.field === "ageBand")) {
+    m2 = t.match(AGE_SINGLE_RE);
+    if (m2) push("ageBand", `aged ${m2[1]}`, m2[0]);
   }
 
-  // Years of experience: "minimum of 8 years of experience"
-  m = t.match(YEARS_RE);
-  if (m) push("yearsExperience", `${m[1]} years of experience`, m[0]);
+  // Gender
+  m = t.match(GENDER_RE);
+  if (m) push("gender", m[0].trim(), m[0]);
+
+  // Student status at the time of submission
+  m = t.match(ENROLMENT_RE);
+  if (m) push("enrolmentStatus", m[0].trim(), m[0]);
+
+  // Career stage
+  m = t.match(CAREER_STAGE_RE);
+  if (m) push("careerStage", m[0].trim(), m[0]);
+
+  // Years of experience: "minimum of 8 years of experience", "8+ years in ML"
+  m = t.match(YEARS_RE) || t.match(YEARS_IN_RE);
+  if (m) push("yearsExperience", m[1] ? `${m[1]} years of experience` : m[0], m[0]);
 
   // Education level
   m = t.match(EDU_RE);
@@ -196,6 +318,10 @@ export function extractRequirements(text: string): Requirement[] {
     if (m) push("educationLevel", `${m[1]} admission (undergraduate)`, m[0]);
   }
 
+  // CGPA floor, kept apart from the topic. Both used to land on fieldOfStudy.
+  m = t.match(GRADE_RE);
+  if (m) push("academicGrade", `minimum CGPA ${m[1]}/${m[2]}`, m[0]);
+
   // Field of study: "in the field of AI policy", "degree in public health".
   // Two words minimum, because a single trailing word is almost always the
   // fragment of a cut-off phrase ("degree in natural", "Study in the").
@@ -204,6 +330,32 @@ export function extractRequirements(text: string): Requirement[] {
     const value = m[1].replace(/^(?:the|a|an|of|in)\s+/i, "").trim();
     if (value.split(/\s+/).length >= 2) push("fieldOfStudy", value, m[0]);
   }
+
+  // A named topic whitelist: thrust areas, special tracks, themes.
+  if (!out.some(r => r.field === "fieldOfStudy")) {
+    m = t.match(TOPIC_RE);
+    if (m) push("fieldOfStudy", m[1].replace(/\s+/g, " ").trim().slice(0, 80), m[0]);
+  }
+
+  // Standardised test floor
+  m = t.match(TEST_RE);
+  if (m) push("standardisedTest", `${m[0].split(/\s+/)[0]} ${m[1] ?? m[2]}`, m[0]);
+
+  // Submission language
+  m = t.match(LANGUAGE_REQ_RE);
+  if (m) push("language", (m[1] ?? m[2] ?? m[3]).trim(), m[0]);
+
+  // Hours or availability commitment
+  m = t.match(HOURS_RE);
+  if (m) push("workHours", m[0].trim(), m[0]);
+
+  // Who may apply at all
+  m = t.match(APPLICANT_TYPE_RE);
+  if (m) push("applicantType", m[0].trim(), m[0]);
+
+  // Registration or membership prerequisite
+  m = t.match(ORG_STATUS_RE);
+  if (m) push("organisationStatus", m[0].replace(/\s+/g, " ").trim().slice(0, 60), m[0]);
 
   // Required documents. Group 1 is the list.
   m = t.match(/\b(?:required|must (?:be )?(?:submit|provide|attach|upload))[a-z ]{0,20}(?:documents?|materials?|items?)\s*(?:are|include|is|:)?\s*([^.;]{4,140})/i);
@@ -262,9 +414,20 @@ export function assessEligibility(
         break;
       }
       case "ageBand":
-      case "yearsExperience":
+      case "nationality":
+      case "residencyOrWorkAuth":
+      case "gender":
       case "educationLevel":
-      case "fieldOfStudy": {
+      case "enrolmentStatus":
+      case "careerStage":
+      case "yearsExperience":
+      case "academicGrade":
+      case "fieldOfStudy":
+      case "standardisedTest":
+      case "language":
+      case "workHours":
+      case "applicantType":
+      case "organisationStatus": {
         const yours = (profile as any)[req.field];
         verdict = compare(req.value, yours);
         reason = verdict === "unknown"
