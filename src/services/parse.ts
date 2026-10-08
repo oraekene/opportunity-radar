@@ -164,6 +164,41 @@ export function extractCompany(title: string, description: string, link: string)
   return companyFromLink(link);
 }
 
+/** Countries only. Broad regions like "emea" are regions, not countries. */
+const COUNTRY_TOKENS = [
+  "united states", "united kingdom", "south africa", "nigeria", "ghana", "kenya",
+  "canada", "australia", "new zealand", "ireland", "germany", "france", "spain",
+  "italy", "poland", "portugal", "netherlands", "sweden", "norway", "denmark",
+  "finland", "brazil", "mexico", "argentina", "colombia", "chile", "peru",
+  "japan", "south korea", "singapore", "indonesia", "philippines", "vietnam",
+  "thailand", "malaysia", "pakistan", "bangladesh", "sri lanka", "nepal",
+  "egypt", "morocco", "tunisia", "rwanda", "uganda", "tanzania", "ethiopia",
+  "zambia", "zimbabwe", "botswana", "namibia", "senegal", "nigeria", "cameroon",
+  "ivory coast", "ghana", "turkey", "greece", "cyprus", "malta", "israel",
+  "united arab emirates", "saudi arabia", "qatar", "kuwait"
+];
+
+/**
+ * The country an item names, read from the body before the title.
+ *
+ * The body is where a cold-email pre-filter needs to look: a GTM Product
+ * Manager listing put "South Africa" in the description, not the title.
+ * Returns "" rather than guessing from a broad region.
+ */
+export function extractEligibilityCountry(title: string, description: string): string {
+  const scan = (text: string): string => {
+    const lower = (text || "").toLowerCase();
+    let best = "";
+    for (const country of COUNTRY_TOKENS) {
+      const re = new RegExp(`(?:^|[^a-z])${country}(?:$|[^a-z])`, "i");
+      if (re.test(lower) && country.length > best.length) best = country;
+    }
+    return best;
+  };
+
+  return scan(description) || scan(title);
+}
+
 /** First region phrase found, longest match wins so "south africa" beats "africa". */
 function findRegion(text: string): string {
   const lower = (text || "").toLowerCase();

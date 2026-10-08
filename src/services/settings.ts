@@ -29,6 +29,18 @@ export function getDefaultSettings(env: Env): UserSettings {
     webhookUrl: env.RADAR_WEBHOOK_URL || "",
     sendRestricted: false,
 
+    // Your own answers to the seven eligibility parameters. Empty means unknown.
+    // Enforcement defaults to "warn" for every field, so nothing blocks unasked.
+    eligibilityProfile: {
+      enforcement: {},
+      country: "",
+      ageBand: "",
+      yearsExperience: undefined,
+      educationLevel: "",
+      fieldOfStudy: "",
+      documentsHeld: ""
+    },
+
     // Kapso.ai (2,000 free/month)
     kapsoApiKey: env.KAPSO_API_KEY || "",
     kapsoPhoneNumberId: env.KAPSO_PHONE_NUMBER_ID || "",

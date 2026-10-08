@@ -6,6 +6,67 @@ It crawls opportunities across 6 distinct categories, runs dedicated **Keyword Q
 
 ---
 
+## 🎯 Eligibility parameters
+
+A feed summary is not the application. The real gates live on the page, so the
+radar reads the apply link and writes down what it finds.
+
+Seven parameters, each toggleable:
+
+| Field | Example of what a page says |
+| :--- | :--- |
+| `country` | "admission into an eligible Federal University in Nigeria" |
+| `ageBand` | "Applicants must be 18-25 years old" |
+| `yearsExperience` | "minimum of 8 years of experience" |
+| `educationLevel` | "undergraduate students", "PhD" |
+| `fieldOfStudy` | "degree in public health" |
+| `requiredDocuments` | "Required documents are a passport, a transcript and a reference letter" |
+| `deadline` | "Deadline: 15 April 2026" |
+
+Every requirement carries the phrase it came from. Nothing is invented: if a
+page has no eligibility section, no requirement is recorded.
+
+Set your own answers and the enforcement of each field in the Control Plane
+under **Your Eligibility Profile**. Three modes per field:
+
+* `warn` (the default for all seven) notes a mismatch and never blocks
+* `enforce` blocks the item from messages and from the webhook
+* `ignore` does not check that field at all
+
+A blank answer means unknown, and unknown never blocks. That is deliberate: a
+half-filled profile cannot hide opportunities from you.
+
+Extraction is scoped to a real eligibility section and requires the country to
+sit in the grammatical slot a gate preposition leaves open, so navigation
+menus and social footers cannot manufacture a requirement that blocks you.
+
+The radar reads at most **10 pages per run**, because a Worker gets 50
+subrequests and the feeds already spend about 32. Each page is cached for 7
+days. Raise `MAX_PAGE_FETCHES_PER_RUN` in `src/services/pageSummary.ts` only
+on the paid subrequest tier.
+
+---
+
+## 📵 Delivery failures are never content
+
+WhatsApp can answer HTTP 200 and still refuse the message. Meta error 131047
+means the 24-hour customer service window closed, and free-form text keeps
+failing until the recipient messages the number again.
+
+The radar treats that as a failed delivery, not a success:
+
+* the response body is read even on HTTP 200, so a refusal is never counted as
+  sent and never burns quota
+* a refusal never becomes part of the message body; provider text stays in the
+  run log
+* the channel is blocked for 24 hours instead of being retried, and the reason
+  appears in the run log as `dispatched.blocked`
+
+To resume on a sandbox number, either send "hello" on WhatsApp to reopen the
+window, or move to an approved template message for re-engagement.
+
+---
+
 ## 🔍 What each item carries
 
 The radar lifts these out of the feed text instead of leaving them in prose:
@@ -13,12 +74,15 @@ The radar lifts these out of the feed text instead of leaving them in prose:
 | Field | Where it comes from |
 | :--- | :--- |
 | `company` | A `Company:` label, the title, or the apply link host |
+| `eligibilityCountry` | A country named in the body, before the title |
 | `region` | The longest region phrase in the text |
 | `eligibility` | `open`, `restricted`, or `unknown`, plus `eligibilityEvidence`, the phrase that decided it |
 | `deadline` | Prose such as "applications close on 15 April 2026" |
 | `salaryBand` | A currency range such as `$150,000 - $180,000` |
 | `isOpportunity` | Declared by the source. News sources set it false |
 | `routeTo` | `application`, `cold_email`, or `none` |
+| `eligibilityRequirements` | The seven parameters read off the page, each with its evidence |
+| `eligibilityChecks` | Per-field verdict and reason |
 | `dedupeKey` | Normalised company plus title, so one job on two boards is one row |
 
 A region on its own is never treated as eligibility. A "South Africa" role reads

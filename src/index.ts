@@ -9,6 +9,8 @@ import { saveDailyOpportunities, getOpportunitiesForDay, getAvailableDates } fro
 import { getAllProviderQuotas } from "./services/usage";
 import { getConsumed, getConsumedKeys, markConsumed } from "./services/consumed";
 import { checkRateLimit, clientIdFrom } from "./services/ratelimit";
+import { enrichWithPages, MAX_PAGE_FETCHES_PER_RUN } from "./services/pageSummary";
+import { applyAssessment, extractRequirements } from "./services/eligibility";
 import { renderDashboardHtml } from "./ui/dashboard";
 import { Env, FeedSource, OpportunityItem } from "./types";
 
@@ -16,6 +18,13 @@ interface SourceFailure {
   sourceId: string;
   sourceName: string;
   reason: string;
+}
+
+/** Page reads are expensive, so spend them on items that would actually send. */
+function sendableRanked(items: OpportunityItem[]): OpportunityItem[] {
+  return items
+    .filter(i => i.routeTo !== "none" && i.isOpportunity)
+    .slice(0, 60);
 }
 
 /**
@@ -98,10 +107,25 @@ async function runOpportunityRadar(env: Env, dryRun: boolean = false, dashboardU
   }
 
   // 6. Always persist all matched opportunities to the Daily History Table in KV
+  // Read the apply page for the items most likely to be sent, because the feed
+  // text does not carry the hard gates. Cached for 7 days, capped per run.
+  const pages = await enrichWithPages(env, sendableRanked(matchedCollapsed), MAX_PAGE_FETCHES_PER_RUN);
+  const profile = settings.eligibilityProfile || { enforcement: {} };
+  for (const item of matchedCollapsed) {
+    const summary = pages.get(item.dedupeKey);
+    if (summary?.ok) {
+      // Page facts beat feed prose when the feed had nothing.
+      if (!item.eligibilityCountry && summary.eligibilityCountry) item.eligibilityCountry = summary.eligibilityCountry;
+      if (!item.deadline && summary.deadline) item.deadline = summary.deadline;
+      if (!item.salaryBand && summary.salaryBand) item.salaryBand = summary.salaryBand;
+    }
+    const text = summary?.ok ? summary.text : item.description;
+    applyAssessment(item, extractRequirements(text), profile);
+  }
   await saveDailyOpportunities(env, matchedCollapsed);
 
   // 7. Dispatch notifications according to user settings (Individual vs Digest)
-  let dispatchResult = { dispatchedCount: 0, errors: [] as string[], suppressed: 0 };
+  let dispatchResult = { dispatchedCount: 0, errors: [] as string[], suppressed: 0, blocked: [] as any[] };
   let webhookResult: { ok: boolean; skipped?: boolean; error?: string } | undefined;
 
   if (!dryRun && unseenCollapsed.length > 0) {
@@ -127,6 +151,8 @@ async function runOpportunityRadar(env: Env, dryRun: boolean = false, dashboardU
     kvErrors,
     totalMatched: matchedCollapsed.length,
     totalUnseen: unseenCollapsed.length,
+    pagesRead: pages.size,
+    blockedByProfile: matchedCollapsed.filter(i => (i.eligibilityBlocking || []).length > 0).length,
     dispatched: dispatchResult,
     webhook: webhookResult,
     settingsUsed: {
@@ -287,6 +313,7 @@ export default {
         description: "This is a test notification confirming your Opportunity Radar Cloudflare Worker is connected and able to reach your WhatsApp via CallMeBot.",
         company: "Opportunity Desk",
         region: "worldwide",
+        eligibilityCountry: "",
         eligibility: "open",
         eligibilityEvidence: "worldwide",
         deadline: "",

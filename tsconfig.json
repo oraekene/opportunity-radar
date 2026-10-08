@@ -9,7 +9,10 @@
     "skipLibCheck": true,
     "noEmit": true,
     "esModuleInterop": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    // Lets node --test load the same modules the worker bundles. Only the files
+    // a test imports need the explicit .ts extension.
+    "allowImportingTsExtensions": true
   },
   "include": ["src/**/*"]
 }

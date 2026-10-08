@@ -1,7 +1,7 @@
 import { CategoryDefinition, CategoryKeywordsConfig, FeedSource, OpportunityItem } from "../types";
 import { RawFeedItem } from "./fetcher";
 import { parseBooleanQuery, evaluateBooleanAST } from "./booleanQuery";
-import { applyParseRule, dedupeKeyFor, extractCompany, extractDeadline, extractRegionVerdict, extractSalaryBand } from "./parse";
+import { applyParseRule, dedupeKeyFor, extractCompany, extractDeadline, extractEligibilityCountry, extractRegionVerdict, extractSalaryBand } from "./parse";
 
 function hashString(str: string): string {
   let hash = 0;
@@ -55,6 +55,7 @@ function buildItem(
     description: raw.description.length > 800 ? `${raw.description.slice(0, 797)}...` : raw.description,
     company,
     region: verdict.region,
+    eligibilityCountry: extractEligibilityCountry(title, raw.description),
     eligibility: verdict.eligibility,
     eligibilityEvidence: verdict.evidence,
     deadline: extractDeadline(raw.description),

@@ -1,11 +1,14 @@
 import { CATEGORIES } from "../config/categories";
 import { UserSettings } from "../types";
+import { ELIGIBILITY_FIELDS } from "../services/eligibility";
 
 export function renderDashboardHtml(settings: UserSettings, availableDates: string[], consumedKeys: string[] = []): string {
   const categoriesJson = JSON.stringify(CATEGORIES);
   const settingsJson = JSON.stringify(settings);
   const datesJson = JSON.stringify(availableDates);
   const consumedJson = JSON.stringify(consumedKeys);
+  // documentsHeld is an answer, not a requirement, so it joins the editor.
+  const eligibilityFieldsJson = JSON.stringify([...ELIGIBILITY_FIELDS, "documentsHeld"]);
 
   return `<!DOCTYPE html>
 <html lang="en" class="h-full bg-slate-900 text-slate-100">
@@ -551,6 +554,33 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
             </div>
           </details>
 
+          <!-- Eligibility Profile: your own answers, per field toggleable -->
+          <details class="border border-slate-800 rounded-lg bg-slate-900/40 overflow-hidden">
+            <summary class="px-4 py-3 bg-slate-900 hover:bg-slate-850 cursor-pointer flex items-center justify-between text-xs font-semibold text-emerald-400 select-none">
+              <span>🎯 Your Eligibility Profile — 7 parameters, each toggleable</span>
+              <span class="text-slate-500 text-[10px]">nothing is enforced until you say so</span>
+            </summary>
+            <div class="p-4 space-y-3">
+              <p class="text-[11px] text-slate-400 leading-relaxed">
+                The radar reads the apply page and writes down what it finds. You decide what happens next.
+                <span class="text-amber-400">Warn</span> notes a mismatch, <span class="text-rose-400">Enforce</span> blocks the item,
+                <span class="text-slate-500">Ignore</span> does not check that field at all. A blank answer means unknown, and unknown never blocks.
+              </p>
+              <div class="overflow-x-auto">
+                <table class="w-full text-[11px]">
+                  <thead>
+                    <tr class="text-slate-500 text-left">
+                      <th class="py-1.5 pr-2 font-medium">Parameter</th>
+                      <th class="py-1.5 pr-2 font-medium">Your answer</th>
+                      <th class="py-1.5 font-medium">Enforcement</th>
+                    </tr>
+                  </thead>
+                  <tbody id="eligibility-profile-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </details>
+
           <!-- Category Editors Accordion -->
           <div id="keywords-accordion" class="space-y-4 pt-1">
           </div>
@@ -585,6 +615,57 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
     let AVAILABLE_DATES = ${datesJson};
     let CONSUMED_KEYS = new Set(${consumedJson});
     let ALL_OPPORTUNITIES = [];
+
+    const ELIGIBILITY_FIELDS = ${eligibilityFieldsJson};
+    const ELIGIBILITY_MODES = ["enforce", "warn", "ignore"];
+
+    function eligibilityProfile() {
+      return CURRENT_SETTINGS.eligibilityProfile || { enforcement: {} };
+    }
+
+    function populateEligibilityProfile() {
+      const body = document.getElementById("eligibility-profile-body");
+      if (!body) return;
+      const p = eligibilityProfile();
+      body.innerHTML = ELIGIBILITY_FIELDS.map(f => {
+        const mode = (p.enforcement && p.enforcement[f]) || "warn";
+        const value = f === "documentsHeld" ? (p.documentsHeld || "") : (p[f] !== undefined && p[f] !== null ? p[f] : "");
+        const inputType = f === "yearsExperience" ? "number" : "text";
+        const options = ELIGIBILITY_MODES.map(m =>
+          \`<option value="\${m}" \${m === mode ? "selected" : ""}>\${m}</option>\`
+        ).join("");
+        const modeColor = mode === "enforce" ? "rose" : mode === "ignore" ? "slate" : "amber";
+        return \`<tr class="border-t border-slate-800/70">
+          <td class="py-2 pr-2 font-mono text-slate-300">\${f}</td>
+          <td class="py-2 pr-2">
+            <input type="\${inputType}" data-ep-value="\${f}" value="\${value}" placeholder="unset"
+              class="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[11px] text-white focus:border-emerald-500" />
+          </td>
+          <td class="py-2">
+            <select data-ep-mode="\${f}" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[11px] text-\${modeColor}-300 focus:border-emerald-500">
+              \${options}
+            </select>
+          </td>
+        </tr>\`;
+      }).join("");
+    }
+
+    function readEligibilityProfile() {
+      const profile = { enforcement: {}, country: "", ageBand: "", yearsExperience: undefined, educationLevel: "", fieldOfStudy: "", documentsHeld: "" };
+      document.querySelectorAll("[data-ep-mode]").forEach(el => {
+        profile.enforcement[el.dataset.epMode] = el.value;
+      });
+      document.querySelectorAll("[data-ep-value]").forEach(el => {
+        const key = el.dataset.epValue;
+        const raw = el.value.trim();
+        if (key === "yearsExperience") {
+          profile.yearsExperience = raw === "" ? undefined : Number(raw);
+        } else {
+          profile[key] = raw;
+        }
+      });
+      return profile;
+    }
 
     // Tabs
     const tabTableBtn = document.getElementById("tab-table-btn");
@@ -950,6 +1031,7 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
       const btn = document.getElementById("btn-save-settings");
       btn.innerText = "Saving...";
       try {
+        updated.eligibilityProfile = readEligibilityProfile();
         const res = await fetch("/api/settings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1091,13 +1173,46 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
 
         const metaBadges = [
           item.company ? \`<span class="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20 text-[10px] font-mono">🏛️ \${item.company}</span>\` : "",
-          item.region ? \`<span class="px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-300 border border-slate-500/20 text-[10px] font-mono">🌍 \${item.region}</span>\` : "",
+          item.eligibilityCountry ? \`<span class="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-[10px] font-mono">🌍 \${item.eligibilityCountry}</span>\` : "",
+          item.region ? \`<span class="px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-300 border border-slate-500/20 text-[10px] font-mono">📍 \${item.region}</span>\` : "",
           \`<span class="px-1.5 py-0.5 rounded bg-\${eligColor}-500/10 text-\${eligColor}-400 border border-\${eligColor}-500/20 text-[10px] font-mono">\${eligLabel}</span>\`,
           item.salaryBand ? \`<span class="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono">💵 \${item.salaryBand}</span>\` : "",
           item.deadline ? \`<span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-mono">⏳ \${item.deadline}</span>\` : "",
           \`<span class="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/20 text-[10px] font-mono">→ \${routeLabel}</span>\`,
           item.isOpportunity === false ? \`<span class="px-1.5 py-0.5 rounded bg-slate-700/40 text-slate-400 border border-slate-600/30 text-[10px] font-mono">news, no application</span>\` : ""
         ].filter(Boolean).join(" ");
+
+        const gateBadges = [
+          (item.eligibilityBlocking || []).length > 0
+            ? \`<span class="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/30 text-[10px] font-mono">⛔ blocked: \${item.eligibilityBlocking.join(", ")}</span>\`
+            : "",
+          (item.eligibilityWarnings || []).length > 0
+            ? \`<span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px] font-mono">⚠ mismatch: \${item.eligibilityWarnings.join(", ")}</span>\`
+            : ""
+        ].filter(Boolean).join(" ");
+
+        const checkRows = (item.eligibilityChecks || []).map(c => {
+          const tone = c.verdict === "fail" ? (c.mode === "enforce" ? "rose" : "amber")
+            : c.verdict === "pass" ? "emerald" : "slate";
+          const mark = c.verdict === "pass" ? "✓" : c.verdict === "fail" ? "✗" : "?";
+          return \`<li class="flex gap-2 py-0.5">
+            <span class="text-\${tone}-400 font-mono shrink-0">\${mark}</span>
+            <span class="min-w-0">
+              <span class="font-mono text-slate-300">\${c.field}</span>
+              <span class="text-slate-400"> wants </span>
+              <span class="text-slate-200">\${c.requirement}</span>
+              <span class="text-slate-500"> — \${c.reason} </span>
+              <span class="text-slate-600 italic">"\${c.evidence}"</span>
+            </span>
+          </li>\`;
+        }).join("");
+
+        const checksBlock = checkRows
+          ? \`<details class="mt-1.5">
+              <summary class="text-[10px] text-emerald-400 cursor-pointer select-none">\${item.eligibilityChecks.length} eligibility requirement(s) read from the page</summary>
+              <ul class="mt-1 space-y-0.5 pl-1 text-[10px] leading-snug">\${checkRows}</ul>
+            </details>\`
+          : "";
 
         return \`
           <tr class="hover:bg-slate-900/60 transition group \${isConsumed ? "opacity-60" : ""}">
@@ -1115,7 +1230,9 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
                 \${item.description}
               </div>
               <div class="pt-1 flex flex-wrap gap-1">\${metaBadges}</div>
+              <div class="pt-1 flex flex-wrap gap-1">\${gateBadges}</div>
               <div class="pt-1 flex flex-wrap gap-1">\${kwBadges}</div>
+              \${checksBlock}
             </td>
             <td class="py-3 px-4 align-top text-slate-400 space-y-1">
               <div class="font-medium text-slate-300">\${item.sourceName}</div>
@@ -1205,6 +1322,15 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
         if (data.kvErrors > 0) {
           logHtml += \`<div class="text-amber-400">⚠ \${data.kvErrors} KV dedupe read error(s); items were not dropped</div>\`;
         }
+        if (data.blockedByProfile > 0) {
+          logHtml += \`<div class="text-rose-300">⛔ \${data.blockedByProfile} item(s) blocked by an enforced eligibility parameter</div>\`;
+        }
+        if (typeof data.pagesRead === "number") {
+          logHtml += \`<div class="text-slate-400">📄 Read \${data.pagesRead} apply page(s) for eligibility details</div>\`;
+        }
+        (data.dispatched?.blocked || []).forEach(b => {
+          logHtml += \`<div class="text-rose-400">📵 \${b.provider} blocked until \${b.blockedUntil}: \${b.reason}</div>\`;
+        });
         if (!dryRun) {
           logHtml += \`<div class="text-orange-400 font-bold mt-1">Dispatched \${data.dispatched?.dispatchedCount || 0} messages!</div>\`;
           if (data.dispatched?.suppressed > 0) {
@@ -1233,6 +1359,7 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
 
     initFilters();
     populateSettingsForm();
+    populateEligibilityProfile();
     loadOpportunities(dateSelect.value);
     loadQuotaStats();
   </script>

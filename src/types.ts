@@ -16,12 +16,21 @@ export interface OpportunityItem {
   description: string;
   company: string;
   region: string;
+  eligibilityCountry: string;
   eligibility: Eligibility;
   eligibilityEvidence: string;
   deadline: string;
   salaryBand: string;
   isOpportunity: boolean;
   routeTo: RouteTo;
+  /** Requirements stated by the apply page. Every entry carries its evidence. */
+  eligibilityRequirements?: import("./services/eligibility").Requirement[];
+  /** Per-field verdict with a reason. Absent when the page was not read. */
+  eligibilityChecks?: import("./services/eligibility").EligibilityCheck[];
+  /** Fields set to enforce where the requirement fails. */
+  eligibilityBlocking?: string[];
+  /** Fields set to warn where the requirement fails. */
+  eligibilityWarnings?: string[];
   categoryId: string;
   categoryName: string;
   categoryIcon: string;
@@ -97,6 +106,9 @@ export interface UserSettings {
 
   // Off by default: the radar shows everything, it only sends what you asked for.
   sendRestricted?: boolean;
+
+  // Your own answers to the seven eligibility parameters. Empty means unknown.
+  eligibilityProfile?: import("./services/eligibility").EligibilityProfile;
 
   // Kapso.ai (2,000 free/month)
   kapsoApiKey?: string;

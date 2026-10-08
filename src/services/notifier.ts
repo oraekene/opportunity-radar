@@ -1,6 +1,8 @@
 import type { OpportunityItem, CategoryDefinition, Env, UserSettings, NotificationChannel } from "../types";
 import { getProviderUsage, incrementProviderUsage } from "./usage";
 import { selectSendable } from "./routing";
+import { detectDeliveryFailure, getChannelBlock, markChannelBlocked } from "./delivery";
+import type { ChannelBlock } from "./delivery";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -90,7 +92,7 @@ async function sendViaKapso(
   text: string,
   settings: UserSettings,
   env: Env
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; needsTemplate?: boolean }> {
   const apiKey = settings.kapsoApiKey || env.KAPSO_API_KEY;
   const phoneId = settings.kapsoPhoneNumberId || env.KAPSO_PHONE_NUMBER_ID;
   const toPhone = (settings.kapsoRecipientPhone || env.KAPSO_RECIPIENT_PHONE || "").replace(/[^0-9]/g, "");
@@ -116,10 +118,12 @@ async function sendViaKapso(
       })
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error(`[Kapso] Error HTTP ${res.status}:`, errText);
-      return { ok: false, error: `Kapso error (${res.status}): ${errText}` };
+    // Always read the body. Meta can answer 200 and still refuse the message.
+    const bodyText = await res.text();
+    const failure = detectDeliveryFailure("whatsapp_kapso", res.status, bodyText);
+    if (failure) {
+      console.error(`[Kapso] Delivery failed (HTTP ${res.status}): ${failure.reason}`);
+      return { ok: false, error: failure.reason, needsTemplate: failure.needsTemplate };
     }
     return { ok: true };
   } catch (err: any) {
@@ -134,7 +138,7 @@ async function sendViaMetaCloudApi(
   text: string,
   settings: UserSettings,
   env: Env
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; needsTemplate?: boolean }> {
   const phoneId = settings.metaPhoneNumberId || env.META_PHONE_NUMBER_ID;
   const token = settings.metaAccessToken || env.META_ACCESS_TOKEN;
   const toPhone = (settings.metaRecipientPhone || env.META_RECIPIENT_PHONE || "").replace(/[^0-9]/g, "");
@@ -164,9 +168,11 @@ async function sendViaMetaCloudApi(
       })
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      return { ok: false, error: `Meta Cloud API (${res.status}): ${errText}` };
+    // Meta is also the upstream of Kapso, so the same 200-with-error case applies.
+    const bodyText = await res.text();
+    const failure = detectDeliveryFailure("whatsapp_meta", res.status, bodyText);
+    if (failure) {
+      return { ok: false, error: failure.reason, needsTemplate: failure.needsTemplate };
     }
     return { ok: true };
   } catch (err: any) {
@@ -323,7 +329,7 @@ async function executeProviderSend(
   settings: UserSettings,
   env: Env,
   topicId?: number
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; needsTemplate?: boolean }> {
   switch (provider) {
     case "whatsapp_kapso":
       return await sendViaKapso(text, settings, env);
@@ -372,15 +378,35 @@ async function dispatchWithRouting(
   settings: UserSettings,
   env: Env,
   topicId?: number
-): Promise<{ ok: boolean; providerUsed?: string; error?: string }> {
+): Promise<{ ok: boolean; providerUsed?: string; error?: string; blocked: ChannelBlock[] }> {
+  const blocked: ChannelBlock[] = [];
+
+  // Record a refusal that cannot succeed on retry, so the next run skips it.
+  const noteBlock = async (provider: NotificationChannel, res: { error?: string; needsTemplate?: boolean }) => {
+    if (res.needsTemplate) {
+      await markChannelBlocked(env, provider, res.error || "Re-engagement window closed");
+      blocked.push({
+        provider,
+        reason: res.error || "Re-engagement window closed",
+        blockedUntil: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      });
+    }
+  };
+
   // If specific target chosen and not auto_router
   if (settings.notificationTarget !== "auto_router") {
-    const res = await executeProviderSend(settings.notificationTarget, text, settings, env, topicId);
-    if (res.ok) {
-      await incrementProviderUsage(env, settings.notificationTarget);
-      return { ok: true, providerUsed: settings.notificationTarget };
+    const target = settings.notificationTarget;
+    const existing = await getChannelBlock(env, target);
+    if (existing) {
+      return { ok: false, error: `${target} blocked until ${existing.blockedUntil}: ${existing.reason}`, blocked };
     }
-    return { ok: false, error: res.error };
+    const res = await executeProviderSend(target, text, settings, env, topicId);
+    if (res.ok) {
+      await incrementProviderUsage(env, target);
+      return { ok: true, providerUsed: target, blocked };
+    }
+    await noteBlock(target, res);
+    return { ok: false, error: res.error, blocked };
   }
 
   // AUTO-ROUTER: Loop through priority order and cycle when limits hit or error occurs
@@ -405,21 +431,33 @@ async function dispatchWithRouting(
       continue;
     }
 
-    // 2. Try sending
+    // 2. Skip a channel whose re-engagement window is closed. Retrying the same
+    //    free-form text is guaranteed to fail again, so do not spend the quota.
+    const existing = await getChannelBlock(env, candidate);
+    if (existing) {
+      console.warn(`[Auto-Router] ${candidate} blocked until ${existing.blockedUntil}. Skipping.`);
+      failureLog.push(`${candidate}: Blocked (${existing.reason})`);
+      blocked.push(existing);
+      continue;
+    }
+
+    // 3. Try sending
     const res = await executeProviderSend(candidate, text, settings, env, topicId);
     if (res.ok) {
       await incrementProviderUsage(env, candidate);
       console.log(`[Auto-Router] Successfully sent via ${candidate} (Month usage: ${usage + 1}/${limit})`);
-      return { ok: true, providerUsed: candidate };
+      return { ok: true, providerUsed: candidate, blocked };
     } else {
       console.warn(`[Auto-Router] ${candidate} failed: ${res.error}. Cascading to next provider...`);
       failureLog.push(`${candidate}: ${res.error}`);
+      await noteBlock(candidate, res);
     }
   }
 
   return {
     ok: false,
-    error: `All providers exhausted: ${failureLog.join(" | ")}`
+    error: `All providers exhausted: ${failureLog.join(" | ")}`,
+    blocked
   };
 }
 
@@ -474,9 +512,9 @@ export async function dispatchOpportunities(
   settings: UserSettings,
   env: Env,
   dashboardUrl?: string
-): Promise<{ dispatchedCount: number; providerUsed?: string; errors: string[]; suppressed: number }> {
+): Promise<{ dispatchedCount: number; providerUsed?: string; errors: string[]; suppressed: number; blocked: ChannelBlock[] }> {
   if (items.length === 0) {
-    return { dispatchedCount: 0, errors: [], suppressed: 0 };
+    return { dispatchedCount: 0, errors: [], suppressed: 0, blocked: [] };
   }
 
   // 0. Gate on what may leave the radar: no route, no application, or restricted.
@@ -486,7 +524,7 @@ export async function dispatchOpportunities(
     console.log(`[Notifier] Suppressed ${suppressed} items (routeTo=none, news, or eligibility=restricted)`);
   }
   if (sendable.length === 0) {
-    return { dispatchedCount: 0, errors: [], suppressed };
+    return { dispatchedCount: 0, errors: [], suppressed, blocked: [] };
   }
 
   // 1. Enforce per-source limit
@@ -508,6 +546,7 @@ export async function dispatchOpportunities(
   let dispatchedCount = 0;
   const errors: string[] = [];
   let lastProviderUsed: string | undefined;
+  const blockedSeen = new Map<string, ChannelBlock>();
 
   if (settings.messageMode === "individual") {
     // Send each opportunity as an individual message
@@ -522,6 +561,7 @@ export async function dispatchOpportunities(
         lastProviderUsed = res.providerUsed;
       } else {
         errors.push(res.error || `Failed to dispatch: ${item.title}`);
+        res.blocked.forEach(b => blockedSeen.set(b.provider, b));
       }
 
       // Pacing delay between dispatches (1.2 seconds)
@@ -559,6 +599,7 @@ export async function dispatchOpportunities(
         lastProviderUsed = res.providerUsed;
       } else {
         errors.push(res.error || `Failed digest for: ${dummyCat.displayName}`);
+        res.blocked.forEach(b => blockedSeen.set(b.provider, b));
       }
 
       if (i < categoriesList.length - 1) {
@@ -567,5 +608,5 @@ export async function dispatchOpportunities(
     }
   }
 
-  return { dispatchedCount, providerUsed: lastProviderUsed, errors, suppressed };
+  return { dispatchedCount, providerUsed: lastProviderUsed, errors, suppressed, blocked: Array.from(blockedSeen.values()) };
 }
