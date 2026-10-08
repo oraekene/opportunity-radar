@@ -11,17 +11,36 @@ It crawls opportunities across 6 distinct categories, runs dedicated **Keyword Q
 A feed summary is not the application. The real gates live on the page, so the
 radar reads the apply link and writes down what it finds.
 
-Seven parameters, each toggleable:
+Seven was the first guess, from a hand-read sample. Calibrating against 348
+real pages changed the list: **nineteen** parameters, because the gates are
+mostly not where a summary suggests. Frequencies are pages out of 348 that
+mention the gate at all.
 
-| Field | Example of what a page says |
+| Field | Where it lands |
 | :--- | :--- |
-| `country` | "admission into an eligible Federal University in Nigeria" |
-| `ageBand` | "Applicants must be 18-25 years old" |
-| `yearsExperience` | "minimum of 8 years of experience" |
-| `educationLevel` | "undergraduate students", "PhD" |
-| `fieldOfStudy` | "degree in public health" |
-| `requiredDocuments` | "Required documents are a passport, a transcript and a reference letter" |
-| `deadline` | "Deadline: 15 April 2026" |
+| `careerStage` | junior, mid-career, senior, new grad, faculty, young professionals (86) |
+| `educationLevel` | MSc, PhD, undergraduate, university admission (69) |
+| `deadline` | "Deadline:", "Applications close", with the date (60) |
+| `employmentType` | full-time, part-time, contract, permanent (42) |
+| `fundingType` | fully funded, stipend, tuition waiver (39) |
+| `workMode` | remote, hybrid, onsite (29) |
+| `requiredDocuments` | the document list a page asks for (19) |
+| `country` | a location or citizenship gate, with every country in the slot (17) |
+| `ageBand` | 18-25 years old, under 30, aged 35 (12) |
+| `fieldOfStudy` | degree in public health (12) |
+| `skillsRequired` | the Qualifications block (9) |
+| `yearsExperience` | 5+ years, minimum of 8 years (9) |
+| `languageRequirement` | English proficiency (6) |
+| `timezoneOverlap` | EST, PST, GMT-8 to GMT+2 (5) |
+| `visaSponsorship` | visa provided, relocation package (2) |
+| `capacity` | ten places, limited to 20 awards (2) |
+| `applicantType` | organisations only versus individuals (1) |
+| `salaryDisclosed` | "market related", unpaid (0 of the sample) |
+| `proposalRequirement` | "submit a business plan", page limit (0 of the sample) |
+
+`timezoneOverlap` is the one that bites hardest: a Lagos-based applicant is
+UTC+1, so a "CST overlap required" or "GMT-8 to GMT+2" posting is a hard fail
+no matter how well the role fits.
 
 Every requirement carries the phrase it came from. Nothing is invented: if a
 page has no eligibility section, no requirement is recorded.
@@ -29,16 +48,19 @@ page has no eligibility section, no requirement is recorded.
 Set your own answers and the enforcement of each field in the Control Plane
 under **Your Eligibility Profile**. Three modes per field:
 
-* `warn` (the default for all seven) notes a mismatch and never blocks
+* `warn` (the default for all nineteen) notes a mismatch and never blocks
 * `enforce` blocks the item from messages and from the webhook
 * `ignore` does not check that field at all
 
 A blank answer means unknown, and unknown never blocks. That is deliberate: a
 half-filled profile cannot hide opportunities from you.
 
-Extraction is scoped to a real eligibility section and requires the country to
-sit in the grammatical slot a gate preposition leaves open, so navigation
-menus and social footers cannot manufacture a requirement that blocks you.
+Extraction is scoped to a real eligibility section, and the country has to sit
+in the grammatical slot a gate label leaves open. That is what stops
+navigation menus and social footers from manufacturing a requirement: an
+earlier version read "Undergraduate" out of a menu bar and lifted Kuwait out of
+a social footer, which under enforce mode blocked a fellowship it had nothing
+to do with. A multi-country slot records every country rather than picking one.
 
 The radar reads at most **10 pages per run**, because a Worker gets 50
 subrequests and the feeds already spend about 32. Each page is cached for 7
@@ -47,23 +69,41 @@ on the paid subrequest tier.
 
 ---
 
-## 📵 Delivery failures are never content
+## 📵 Delivery failures, and what automation can and cannot fix
 
 WhatsApp can answer HTTP 200 and still refuse the message. Meta error 131047
-means the 24-hour customer service window closed, and free-form text keeps
-failing until the recipient messages the number again.
+means the 24-hour customer service window closed.
 
-The radar treats that as a failed delivery, not a success:
+**An automated "hello" cannot reopen the window.** The window is opened by the
+*customer* messaging the business number. Our own outbound message does not
+count, so no scheduled greeting from this Worker will restore delivery. Your
+observation that sending "hello" by hand fixed it is exactly right, and that is
+the only thing that did.
 
-* the response body is read even on HTTP 200, so a refusal is never counted as
-  sent and never burns quota
-* a refusal never becomes part of the message body; provider text stays in the
-  run log
-* the channel is blocked for 24 hours instead of being retried, and the reason
-  appears in the run log as `dispatched.blocked`
+The two paths that do work:
 
-To resume on a sandbox number, either send "hello" on WhatsApp to reopen the
-window, or move to an approved template message for re-engagement.
+1. **Have the customer message the number again**, then send within 24 hours.
+2. **Use an approved template** for re-engagement outside the window. That
+   needs a template created and approved in Meta Business Manager first.
+
+What automation *can* do is notice the inbound message and hold sends until it
+happens:
+
+```bash
+# Kapso or Meta posts inbound webhooks here. Records the time, opens the window.
+curl -X POST https://<worker>/webhook/inbound -H 'Content-Type: application/json' -d '{}'
+
+# Is free-form delivery currently possible, and for how long?
+curl https://<worker>/api/window
+```
+
+`/api/window` reports the last inbound time, when the window closes, and any
+channel currently blocked. Point the Kapso or Meta inbound webhook at
+`/webhook/inbound` and the radar stops guessing.
+
+On the content side, provider text never becomes a message body: a refusal
+stays in the run log, a 131047 refusal blocks that channel for 24 hours instead
+of being retried, and the reason appears as `dispatched.blocked`.
 
 ---
 

@@ -170,13 +170,43 @@ const COUNTRY_TOKENS = [
   "canada", "australia", "new zealand", "ireland", "germany", "france", "spain",
   "italy", "poland", "portugal", "netherlands", "sweden", "norway", "denmark",
   "finland", "brazil", "mexico", "argentina", "colombia", "chile", "peru",
-  "japan", "south korea", "singapore", "indonesia", "philippines", "vietnam",
-  "thailand", "malaysia", "pakistan", "bangladesh", "sri lanka", "nepal",
+  "india", "japan", "south korea", "singapore", "indonesia", "philippines",
+  "vietnam", "thailand", "malaysia", "pakistan", "bangladesh", "sri lanka", "nepal",
   "egypt", "morocco", "tunisia", "rwanda", "uganda", "tanzania", "ethiopia",
-  "zambia", "zimbabwe", "botswana", "namibia", "senegal", "nigeria", "cameroon",
-  "ivory coast", "ghana", "turkey", "greece", "cyprus", "malta", "israel",
-  "united arab emirates", "saudi arabia", "qatar", "kuwait"
+  "zambia", "zimbabwe", "botswana", "namibia", "senegal", "cameroon",
+  "cote d'ivoire", "turkey", "greece", "cyprus", "malta", "israel",
+  "united arab emirates", "saudi arabia", "qatar", "kuwait", "iran", "iraq"
 ];
+
+/**
+ * Extra country spellings that are safe only inside a label slot such as
+ * "Location: USA UK India". Bare "us" would fire on "tell us" in free text, so
+ * these are never used for scanning a description.
+ */
+export const COUNTRY_SLOT_EXTRA = ["usa", "u.s", "uk", "uae", "u.k", "korea"];
+
+/**
+ * "US" alone is only a country in a list or an adjective, never in "up to US".
+ * Requiring punctuation or a qualifier after it separates Location: US/Canada
+ * and US-based from a dollar amount.
+ */
+export const US_LOCATION_RE = /\bU\.?S\.?\b(?=\s*[-/,)]|\s*[-/]\s|\s*(?:based|only|time ?zones?|citizens?|residents?|remote))/i;
+
+/** Every country named in the text, in reading order, deduplicated. */
+export function extractAllCountries(text: string, includeShortForms: boolean = false): string[] {
+  const lower = (text || "").toLowerCase();
+  const tokens = includeShortForms ? [...COUNTRY_TOKENS, ...COUNTRY_SLOT_EXTRA] : COUNTRY_TOKENS;
+  const hits: { country: string; at: number }[] = [];
+  const seen = new Set<string>();
+  for (const country of tokens) {
+    if (seen.has(country)) continue;
+    seen.add(country);
+    const re = new RegExp(`(?:^|[^a-z])${country.replace(/[.']/g, "\\$&")}(?:$|[^a-z])`, "gi");
+    const m = re.exec(lower);
+    if (m) hits.push({ country, at: m.index });
+  }
+  return hits.sort((a, b) => a.at - b.at).map(h => h.country);
+}
 
 /**
  * The country an item names, read from the body before the title.
@@ -186,16 +216,7 @@ const COUNTRY_TOKENS = [
  * Returns "" rather than guessing from a broad region.
  */
 export function extractEligibilityCountry(title: string, description: string): string {
-  const scan = (text: string): string => {
-    const lower = (text || "").toLowerCase();
-    let best = "";
-    for (const country of COUNTRY_TOKENS) {
-      const re = new RegExp(`(?:^|[^a-z])${country}(?:$|[^a-z])`, "i");
-      if (re.test(lower) && country.length > best.length) best = country;
-    }
-    return best;
-  };
-
+  const scan = (text: string): string => extractAllCountries(text)[0] || "";
   return scan(description) || scan(title);
 }
 

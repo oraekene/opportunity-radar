@@ -118,3 +118,67 @@ export async function clearChannelBlocked(env: Env, provider: NotificationChanne
     // Nothing to do. The TTL will clear it.
   }
 }
+
+/**
+ * The 24-hour customer service window opens when the CUSTOMER writes to the
+ * business number. Our own outbound message cannot open it, so no amount of
+ * automated "hello" from this Worker will restore delivery. What automation
+ * can do is notice that the customer wrote, and hold sends until it did.
+ */
+const WINDOW_HOURS = 24;
+
+const inboundKey = (provider: NotificationChannel) => `window_inbound:${provider}`;
+
+export interface WindowState {
+  provider: NotificationChannel;
+  lastInboundAt: string | null;
+  windowOpenUntil: string | null;
+  open: boolean;
+  hoursLeft: number;
+}
+
+export async function recordInboundMessage(
+  env: Env,
+  provider: NotificationChannel,
+  at: string = new Date().toISOString()
+): Promise<WindowState> {
+  if (env.RADAR_HISTORY) {
+    try {
+      await env.RADAR_HISTORY.put(inboundKey(provider), JSON.stringify({ at }), {
+        // Keep it long enough to explain a silence.
+        expirationTtl: 7 * 24 * 60 * 60
+      });
+    } catch (err: any) {
+      console.error(`[Delivery] Failed to record inbound for ${provider}: ${err?.message || err}`);
+    }
+  }
+  return getWindowState(env, provider);
+}
+
+export async function getWindowState(env: Env, provider: NotificationChannel): Promise<WindowState> {
+  const empty: WindowState = {
+    provider,
+    lastInboundAt: null,
+    windowOpenUntil: null,
+    open: false,
+    hoursLeft: 0
+  };
+  if (!env.RADAR_HISTORY) return empty;
+
+  try {
+    const raw = await env.RADAR_HISTORY.get(inboundKey(provider));
+    if (!raw) return empty;
+    const { at } = JSON.parse(raw) as { at: string };
+    const until = new Date(new Date(at).getTime() + WINDOW_HOURS * 60 * 60 * 1000);
+    const msLeft = until.getTime() - Date.now();
+    return {
+      provider,
+      lastInboundAt: at,
+      windowOpenUntil: until.toISOString(),
+      open: msLeft > 0,
+      hoursLeft: msLeft > 0 ? Math.round((msLeft / (60 * 60 * 1000)) * 10) / 10 : 0
+    };
+  } catch {
+    return empty;
+  }
+}

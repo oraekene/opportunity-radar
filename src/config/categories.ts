@@ -3,9 +3,11 @@ import { CategoryDefinition } from "../types";
 // Per-source defaults: parseRule is "directPosting" and carriesApplication is
 // true unless the source says otherwise. Only the exceptions are annotated.
 //
-// Removed 2026-10-07: remote_ok. remoteok.com retired /remote-jobs.rss and now
-// answers HTTP 410. RemoteOK still has a JSON API at remoteok.com/api if you
-// want the coverage back; it needs a new source type.
+// Removed 2026-10-08 after the page-calibration sweep:
+//   remote_ok    remoteok.com retired /remote-jobs.rss, answers HTTP 410. It still
+//                has a JSON API at remoteok.com/api if you want it back; needs a new type.
+//   techstars_news  www.techstars.com does not resolve at all.
+//   wwr_contract weworkremotely.com returns a 301 with no Location header.
 export const CATEGORIES: CategoryDefinition[] = [
   // 1. Grants & Fellowships
   {
@@ -135,12 +137,6 @@ export const CATEGORIES: CategoryDefinition[] = [
         carriesApplication: false
       },
       {
-        id: "techstars_news",
-        name: "Techstars News",
-        url: "https://www.techstars.com/newsroom/rss.xml",
-        carriesApplication: false
-      },
-      {
         id: "founders_you_should_know",
         name: "Founders You Should Know",
         url: "https://newsletter.foundersysk.com/feed",
@@ -181,11 +177,6 @@ export const CATEGORIES: CategoryDefinition[] = [
     routeTo: "cold_email",
     sources: [
       {
-        id: "wwr_contract",
-        name: "We Work Remotely - Contract",
-        url: "https://weworkremotely.com/categories/remote-contract-jobs.rss"
-      },
-      {
         id: "problogger",
         name: "ProBlogger Jobs",
         url: "https://problogger.com/jobs/feed/"
@@ -193,7 +184,7 @@ export const CATEGORIES: CategoryDefinition[] = [
       {
         id: "remotive",
         name: "Remotive - All Jobs",
-        url: "https://remotive.com/job/rss"
+        url: "https://remotive.com/remote-jobs/feed"
       },
       {
         id: "hn_freelance",

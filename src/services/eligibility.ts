@@ -1,5 +1,5 @@
 import type { OpportunityItem } from "../types";
-import { extractDeadline, extractEligibilityCountry } from "./parse.ts";
+import { extractAllCountries, extractDeadline, US_LOCATION_RE } from "./parse.ts";
 
 /**
  * The parameters a reviewer states and a candidate has to satisfy.
@@ -31,6 +31,15 @@ export const ELIGIBILITY_FIELDS = [
   "applicantType",
   "organisationStatus",
   "requiredDocuments",
+  "employmentType",
+  "workMode",
+  "timezoneOverlap",
+  "visaSponsorship",
+  "fundingType",
+  "salaryDisclosed",
+  "skillsRequired",
+  "capacity",
+  "proposalRequirement",
   "deadline"
 ] as const;
 
@@ -76,6 +85,15 @@ export const DEFAULT_ENFORCEMENT: Record<EligibilityField, EnforcementMode> = {
   applicantType: "warn",
   organisationStatus: "warn",
   requiredDocuments: "warn",
+  employmentType: "warn",
+  workMode: "warn",
+  timezoneOverlap: "warn",
+  visaSponsorship: "warn",
+  fundingType: "warn",
+  salaryDisclosed: "warn",
+  skillsRequired: "warn",
+  capacity: "warn",
+  proposalRequirement: "warn",
   deadline: "warn"
 };
 
@@ -94,6 +112,9 @@ export interface EligibilityProfile {
   yearsExperience?: number;
   academicGrade?: string;
   fieldOfStudy?: string;
+  employmentType?: string;
+  workMode?: string;
+  timezoneOverlap?: string;
   standardisedTest?: string;
   language?: string;
   workHours?: string;
@@ -143,8 +164,12 @@ const GENDER_RE = /\b(?:women|female|men|male|girls|boys)[- ]only\b|\bonly\s+(?:
 /** "US work authorization required." states the gate without ever saying "only". */
 const WORK_AUTH_RE = /\b(?:us|u\.s\.|united states)\s+work\s+authori[sz]ation\s+(?:is\s+)?required\b|\bwork\s+authori[sz]ation\s+required\b|\bmust\s+be\s+(?:a\s+)?(?:u\.s\.|us)\s+citizen\b|\brequire[sd]?\s+(?:a\s+)?security\s+clearance\b/i;
 const ON_SITE_RE = /\bon-?site\b|\bin-?person\b/i;
-/** "early career", "graduate degree no earlier than 2021". */
-const CAREER_STAGE_RE = /\bearly[- ]career\b|\brecent\s+graduat|\bgraduate\s+degree\s+no\s+earlier\s+than\s+\d{4}|\bno\s+earlier\s+than\s+\d{4}\b|\byoung\s+professional|\bfresh\s+graduate/i;
+/**
+ * "early career", "graduate degree no earlier than 2021", and the very common
+ * "junior and mid-career" / "senior scholars" phrasing the calibration sweep
+ * found on 86 of 348 real pages.
+ */
+const CAREER_STAGE_RE = /\bearly[- ]career\b|\brecent\s+graduat|\bgraduate\s+degree\s+no\s+earlier\s+than\s+\d{4}|\bno\s+earlier\s+than\s+\d{4}\b|\byoung\s+professional|\bfresh\s+graduate|\bjunior\b|\bmid[- ]?career\b|\bsenior\s+(?:scholars?|researchers?|fellows?|professionals?|people)\b|\bfaculty\b|\bpostdoc/i;
 /** "currently enrolled in an accredited tertiary institution". */
 const ENROLMENT_RE = /\bcurrently\s+enrolled\b|\bmust\s+be\s+enrolled\b|\benrolled\s+in\s+(?:an?\s+)?(?:accredited|eligible|recogni[sz]ed)\b|\b(?:must|should)\s+be\s+(?:currently\s+)?(?:pursuing|studying)\b|\bin\s+candidature\b/i;
 /** Both sides take trailing zeros: "3.70/4.00" must not truncate to "3.7". */
@@ -154,9 +179,11 @@ const TEST_RE = /(?:IELTS|TOEFL)[^.;]{0,30}?(\d+(?:\.\d+)?)|CEFR\s*([ABC][12])/i
 const TOPIC_RE = /(?:thrust\s+areas?|disciplines?|fields?\s+of\s+study|special\s+tracks?|theme|focus(?:es)?\s+on|must\s+pursue\s+research\s+within)\s*:?\s*([^.;]{4,120})/i;
 const LANGUAGE_REQ_RE = /(?:application|applications|essay|submissions?)\s+shall\s+be\s+made\s+in\s+([A-Z][a-z]+)|\blanguage\s*:?\s*([A-Z][a-z]+)|\bsubmitted\s+in\s+([A-Z][a-z]+)/i;
 /** A commitment gate: hours, availability, working time. */
-const HOURS_RE = /\b\d{1,2}\s*(?:-\s*\d{1,2}\s*)?h(?:rs?)?\.?\s*\/\s*week\b|\b\d{1,2}\s*(?:-\s*\d{1,2}\s*)?hours?\s+(?:per|a)\s+week\b|\bpart[- ]time\b|\bfull[- ]?time\b|\bmust\s+be\s+available\b|\bfull\s+availability\b/i;
+// Full-time and part-time are an employment TYPE, not an hours commitment.
+// They are captured by employmentType, so they must not also land here.
+const HOURS_RE = /\b\d{1,2}\s*(?:-\s*\d{1,2}\s*)?h(?:rs?)?\.?\s*\/\s*week\b|\b\d{1,2}\s*(?:-\s*\d{1,2}\s*)?hours?\s+(?:per|a)\s+week\b|\bmust\s+be\s+available\b|\bfull\s+availability\b|\b\d{1,2}\s*(?:-\s*\d{1,2}\s*)?days?\s+(?:per|a)\s+week\b/i;
 /** Who may apply at all: companies only, universities only, nonprofits. */
-const APPLICANT_TYPE_RE = /(?:designed\s+for|open\s+to|reserved\s+for)\s+(?:companies|corporates?|non-?profits?|universit(?:y|ies)|organi[sz]ations?|NGOs?|SMEs?|start-?ups?)\b|(?:companies|corporates?|non-?profits?|universit(?:y|ies)|organi[sz]ations?|NGOs?)\s+only\b|\bfor\s+(?:people|professionals?|graduates?|students?|researchers?)\s+(?:working|employed)\b/i;
+const APPLICANT_TYPE_RE = /(?:designed\s+for|open\s+to|reserved\s+for|for)\s+(?:eligible\s+)?(?:companies|corporates?|non-?profits?|universit(?:y|ies)|organi[sz]ations?|NGOs?|SMEs?|start-?ups?|individuals?|candidates?)\b|(?:companies|corporates?|non-?profits?|universit(?:y|ies)|organi[sz]ations?|NGOs?)\s+only\b|\bfor\s+(?:people|professionals?|graduates?|students?|researchers?)\s+(?:working|employed)\b/i;
 /** A prerequisite the applicant already has: membership, registration, affiliation. */
 const ORG_STATUS_RE = /\bparticipants?\s+of\s+the\s+[A-Z][A-Za-z\s]{2,40}|\bmust\s+be\s+(?:a\s+)?(?:registered|member)\b|\brequired\s+to\s+(?:join|be\s+a\s+member)|\b(?:currently\s+)?(?:engaged|affiliated|employed)\s+(?:with|at)\s+(?:a|an|the)\b|\b(?:affiliated|employed)\s+with\s+(?:a|an)\b|\b(?:at|with)\s+a\s+(?:university|college|polytechnic|institute|organi[sz]ation|research\s+cent(?:re|er)|non-?profit|company)\b|\bwilling\s+to\s+join\b/i;
 const NATIONALITY_RE = /\bnationals?\s+of\s+([A-Z][A-Za-z\s,]{2,60})/i;
@@ -178,11 +205,11 @@ const EDU_RE = /\b(ph\.?d|doctorate|doctoral|master'?s?|m\.?sc|msc|mba|b\.?sc|bs
  * that has nothing to do with it. So find an anchor, take the text under it,
  * and keep it only when it actually states something.
  */
-const ANCHOR_RE = /\b(eligibility|eligible|who can apply|who is eligible|who may apply|requirements?|criteria|minimum|how to apply|application (?:criteria|requirements)|admission)\b/gi;
+const ANCHOR_RE = /\b(eligibility|eligible|who can apply|who is eligible|who may apply|who we.re looking for|qualifications?|requirements?|criteria|minimum|at least|must have|you have|the role|about the role|role description|job description|how to apply|application (?:criteria|requirements)|admission|skills? (?:and|&) experience)\b/gi;
 
 /** Something a gate actually looks like, not a menu label. */
 const REQUIREMENT_SIGNAL =
-  /\b(\d{1,2}\s*[-–]\s*\d{1,2}\s*years?|years?\s+of\s+experience|degree|cgpa|gpa|documents?|citizen|national|residen\w*|at\s+least|undergraduate|postgraduate|master'?s?|ph\.?d|doctorate|bachelor'?s?|diploma|women|female|enrolled|early[- ]career|ielts|toefl|companies|only|membership|work\s+authori[sz]ation|aged?\s*\d{1,2}|\d{1,2}\+?\s*years|english|french|spanish|hours?|\d{1,2}\s*h(?:rs?)?\s*\/\s*week|availability)\b/i;
+  /\b(\d{1,2}\s*[-–]\s*\d{1,2}\s*years?|years?\s+of\s+experience|degree|cgpa|gpa|documents?|citizen|national|residen\w*|at\s+least|undergraduate|postgraduate|master'?s?|ph\.?d|doctorate|bachelor'?s?|diploma|women|female|enrolled|early[- ]career|ielts|toefl|companies|only|membership|work\s+authori[sz]ation|aged?\s*\d{1,2}|\d{1,2}\+?\s*years|english|french|spanish|hours?|\d{1,2}\s*h(?:rs?)?\s*\/\s*week|availability|junior|mid[- ]?career|faculty|postdoc|remote|hybrid|on-?site|full[ -]?time|part[ -]?time|contract|fully\s+funded|stipend|visa|relocation|proficiency|\d{1,4}\s+(?:places|seats|awards)|eligible|registered|organi[sz]ations?)\b/i;
 
 const SECTION_WINDOW_BEFORE = 400;
 const SECTION_WINDOW_AFTER = 700;
@@ -216,19 +243,39 @@ const COUNTRY_GATE_PATTERNS: RegExp[] = [
   /\b(?:admission|admitted|matriculation)\s+(?:into|to)\s+(?:an?\s+|the\s+)?(?:eligible\s+|accredited\s+|recognised\s+|recognized\s+)?[A-Za-z ]{0,24}(?:university|college|polytechnic|institute)\s+(?:in|at)\s+([A-Za-z][A-Za-z .'-]{2,28})/i
 ];
 
-function findCountryGate(t: string): { value: string; evidence: string } | null {
+/** A country in the slot a label leaves open: "Location: South Africa". */
+const COUNTRY_LABEL_RE = /\b(?:location|locations|based in|located in|living in|residents? of|citizens? of|nationals? of|target sourcing locations?)\s*[:\-]?\s*([^.;]{2,60})/i;
+
+/** Read from the whole page: a "Location:" line usually sits outside the gate block. */
+function findCountryGate(full: string): { value: string; evidence: string } | null {
+  for (const m of full.matchAll(new RegExp(COUNTRY_LABEL_RE.source, "gi"))) {
+    // Record every country in the slot. Picking one out of "US, Canada, Europe"
+    // reads as a restriction the page never states.
+    const countries = extractAllCountries(m[1], true);
+    if (US_LOCATION_RE.test(m[1]) && !countries.includes("usa")) countries.unshift("usa");
+    if (countries.length) return { value: countries.join(", "), evidence: m[0].slice(0, 160) };
+  }
   for (const pattern of COUNTRY_GATE_PATTERNS) {
-    const m = t.match(pattern);
+    const m = full.match(pattern);
     if (!m) continue;
     const slot = m[1];
-    const country = extractEligibilityCountry("", slot);
-    // The slot has to actually be a country, not "Nigeria and Ghana applicants".
-    if (country && normalise(slot).split(" ").includes(country)) {
-      return { value: country, evidence: m[0] };
-    }
+    const countries = extractAllCountries(slot, true);
+    if (US_LOCATION_RE.test(slot) && !countries.includes("usa")) countries.unshift("usa");
+    if (countries.length) return { value: countries.join(", "), evidence: m[0] };
   }
   return null;
 }
+
+/** Job-post gates that the calibration sweep found on real pages. */
+const EMPLOYMENT_RE = /\b(full[ -]?time|part[ -]?time|contract(?:or)?|permanent|fixed[ -]?term|internship|freelance|volunteer|self[ -]employed|independent contractor)\b/i;
+const WORKMODE_RE = /\b(fully remote|100% remote|remote-?first|remote|hybrid|on-?site|onsite|in-?office|in office)\b/i;
+const TIMEZONE_RE = /\b((?:GMT|UTC)\s?[+-]?\d{1,2}\s?(?:to|–|-)\s?(?:GMT|UTC)?\s?[+-]?\d{1,2}|(?:GMT|UTC)\s?[+-]?\d{1,2}|EST|EDT|PST|PDT|CST|CDT|MST|AEST|AEDT|BST|CET|WET)\b(?:\s*(?:time zone|timezone|overlap|business hours))?/i;
+const VISA_RE = /\b(visa sponsorship|visa[s]? (?:provided|available|supported)|work permit|relocation (?:support|assistance|package)|will sponsor)\b/i;
+const FUNDING_RE = /\b(fully funded|full funding|partially funded|partial funding|travel (?:grant|support)|stipend(?: of)?|tuition (?:waiver|fee[s]? covered)|fees? covered|covers? (?:all )?(?:tuition|fees)|scholarship covers)\b/i;
+const SALARY_HIDDEN_RE = /\b(salary|compensation|pay|stipend)\s*(?:is|:|-)?\s*(market related|not disclosed|undisclosed|unpaid|on a case by case basis|negotiable|competitive)\b/i;
+const SKILLS_RE = /\b(?:requirements?|qualifications?|skills?)(?:\s*(?:are|include|required|needed))?\s*[:\-]\s*([^.;]{8,180})/i;
+const CAPACITY_RE = /\b(\d{1,4}\s+(?:places|seats|slots|awards|grants?|scholarships|participants|selected|candidates)\b|limited to \d{1,4}|first come,? first served)/i;
+const PROPOSAL_RE = /\b(submit (?:a )?(?:full )?(?:proposal|project proposal|business plan|concept note|technical proposal|expression of interest|application package)|proposals? must be (?:submitted|submitted by)|(?:proposal|business plan|concept note) of no more than \d+ pages)\b/i;
 
 /**
  * Requirements stated in the page text. Every entry carries the phrase it came
@@ -239,18 +286,47 @@ export function extractRequirements(text: string): Requirement[] {
   const full = (text || "").replace(/\s+/g, " ");
   if (!full) return out;
   const t = eligibilityContext(full);
-  if (!t) return out;
+  // No eligibility section is not a reason to return nothing: a country label and
+  // a deadline usually live outside it.
 
   const push = (field: EligibilityField, value: string, evidence: string) => {
     const clean = value.replace(/\s+/g, " ").trim();
     const cite = evidence.replace(/\s+/g, " ").trim();
-    if (clean && cite && !out.some(r => r.field === field)) out.push({ field, value: clean, evidence: cite.slice(0, 160) });
+    if (clean && cite && !out.some(r => r.field === field)) out.push({ field, value: clean.slice(0, 120), evidence: cite.slice(0, 160) });
   };
 
   let m: RegExpMatchArray | null;
 
-  // Country gate
-  const countryGate = findCountryGate(t);
+  // Job-post gates from the calibration sweep. The first stated value wins.
+  m = t.match(EMPLOYMENT_RE);
+  if (m) push("employmentType", m[1], m[0]);
+
+  m = t.match(WORKMODE_RE);
+  if (m) push("workMode", m[1], m[0]);
+
+  m = t.match(TIMEZONE_RE);
+  if (m) push("timezoneOverlap", m[1], m[0]);
+
+  m = t.match(VISA_RE);
+  if (m) push("visaSponsorship", m[0], m[0]);
+
+  m = t.match(FUNDING_RE);
+  if (m) push("fundingType", m[1], m[0]);
+
+  m = t.match(SALARY_HIDDEN_RE);
+  if (m) push("salaryDisclosed", "salary not disclosed", m[0]);
+
+  m = t.match(SKILLS_RE);
+  if (m) push("skillsRequired", m[1], m[0]);
+
+  m = t.match(CAPACITY_RE);
+  if (m) push("capacity", m[1], m[0]);
+
+  m = t.match(PROPOSAL_RE);
+  if (m) push("proposalRequirement", m[0], m[0]);
+
+  // Country gate. Read from the whole page, not the section.
+  const countryGate = findCountryGate(full);
   if (countryGate) push("country", countryGate.value, countryGate.evidence);
 
   // Nationality. Separate from country because "nationals of ITU member states" is a
@@ -427,7 +503,10 @@ export function assessEligibility(
       case "language":
       case "workHours":
       case "applicantType":
-      case "organisationStatus": {
+      case "organisationStatus":
+      case "employmentType":
+      case "workMode":
+      case "timezoneOverlap": {
         const yours = (profile as any)[req.field];
         verdict = compare(req.value, yours);
         reason = verdict === "unknown"

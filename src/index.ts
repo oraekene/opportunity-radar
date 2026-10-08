@@ -9,6 +9,7 @@ import { saveDailyOpportunities, getOpportunitiesForDay, getAvailableDates } fro
 import { getAllProviderQuotas } from "./services/usage";
 import { getConsumed, getConsumedKeys, markConsumed } from "./services/consumed";
 import { checkRateLimit, clientIdFrom } from "./services/ratelimit";
+import { getWindowState, recordInboundMessage, clearChannelBlocked, getChannelBlock } from "./services/delivery";
 import { enrichWithPages, MAX_PAGE_FETCHES_PER_RUN } from "./services/pageSummary";
 import { applyAssessment, extractRequirements } from "./services/eligibility";
 import { renderDashboardHtml } from "./ui/dashboard";
@@ -266,6 +267,43 @@ export default {
       }
       const consumed = await getConsumed(env);
       return new Response(JSON.stringify(consumed, null, 2), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    // 4b. Inbound webhook. The 24-hour window opens when the CUSTOMER writes,
+    // so this is the only thing that reopens it. Record it and unblock.
+    if (url.pathname === "/webhook/inbound" || url.pathname === "/api/inbound") {
+      if (request.method !== "POST") {
+        return new Response(JSON.stringify({ error: "POST only" }), { status: 405 });
+      }
+      let payload: any = {};
+      try {
+        payload = await request.json();
+      } catch {
+        payload = {};
+      }
+      const settings = await getSettings(env);
+      const provider = (payload.provider as any) || settings.notificationTarget || "whatsapp_kapso";
+      const state = await recordInboundMessage(env, provider, payload.at || new Date().toISOString());
+      // A fresh inbound means the window is open again.
+      await clearChannelBlocked(env, provider as any);
+      return new Response(JSON.stringify({ ok: true, window: state }, null, 2), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    // 4c. Window status: is free-form delivery currently possible?
+    if (url.pathname === "/api/window") {
+      const settings = await getSettings(env);
+      const providers = settings.routerPriority || ["whatsapp_kapso"];
+      const windows = [];
+      for (const p of providers) {
+        windows.push(await getWindowState(env, p));
+        const block = await getChannelBlock(env, p);
+        if (block) windows.push(block);
+      }
+      return new Response(JSON.stringify({ windows }, null, 2), {
         headers: { "Content-Type": "application/json" }
       });
     }
