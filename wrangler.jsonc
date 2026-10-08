@@ -12,37 +12,24 @@
   },
   "kv_namespaces": [
     {
-      "binding": "SEEN_OPPORTUNITIES",
+      // 30-day seen set. Dedupe memory only, safe to wipe.
+      "binding": "RADAR_SEEN",
+      "id": "ee093d68ee2444cbabd920d56f76a609"
+    },
+    {
+      // Daily history, dates index, settings, provider quota counters.
+      "binding": "RADAR_HISTORY",
       "id": "f7f0f9c134f949089d74cdc19ebe9d0b"
+    },
+    {
+      // What you acted on. Written only by POST /api/consumed.
+      "binding": "RADAR_CONSUMED",
+      "id": "1bac65346d0944959bae682f8ded0604"
     }
   ],
   "vars": {
-    // Delivery Channel Settings (auto_router, whatsapp_kapso, whatsapp_meta, whatsapp_twilio, telegram, whatsapp_callmebot)
-    "NOTIFIER_TARGET": "auto_router",
-    
-    // Kapso.ai Gateway (2,000 Free Messages/Month)
-    "KAPSO_API_KEY": "",
-    "KAPSO_PHONE_NUMBER_ID": "",
-    "KAPSO_RECIPIENT_PHONE": "",
-
-    // Meta Official Cloud API (1,000 Free Messages/Month)
-    "META_PHONE_NUMBER_ID": "",
-    "META_ACCESS_TOKEN": "",
-    "META_RECIPIENT_PHONE": "",
-
-    // CallMeBot (Personal WhatsApp)
-    "CALLMEBOT_PHONE": "",
-    "CALLMEBOT_APIKEY": "",
-    
-    // Green-API (Optional: for sending to separate WhatsApp group IDs)
-    "GREENAPI_INSTANCE_ID": "",
-    "GREENAPI_API_TOKEN": "",
-    
-    // Telegram (Optional: for sending to individual Topics in a Supergroup)
-    "TELEGRAM_BOT_TOKEN": "",
-    "TELEGRAM_CHAT_ID": "",
-    
-    // Discord (Optional: Webhook URL)
-    "DISCORD_WEBHOOK_URL": ""
+    // Only non-secret values live here. Every key, token, phone and URL is set
+    // with `wrangler secret put`, so a committed file never names a credential.
+    "NOTIFIER_TARGET": "auto_router"
   }
 }

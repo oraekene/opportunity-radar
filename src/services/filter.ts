@@ -1,6 +1,7 @@
-import { CategoryDefinition, CategoryKeywordsConfig, OpportunityItem } from "../types";
+import { CategoryDefinition, CategoryKeywordsConfig, FeedSource, OpportunityItem } from "../types";
 import { RawFeedItem } from "./fetcher";
 import { parseBooleanQuery, evaluateBooleanAST } from "./booleanQuery";
+import { applyParseRule, dedupeKeyFor, extractCompany, extractDeadline, extractRegionVerdict, extractSalaryBand } from "./parse";
 
 function hashString(str: string): string {
   let hash = 0;
@@ -35,11 +36,46 @@ export function parseKeywordsToRegex(text?: string): RegExp[] {
   return regexes;
 }
 
+/** Every matched item, with the fields lifted out of the free text. */
+function buildItem(
+  raw: RawFeedItem,
+  category: CategoryDefinition,
+  title: string,
+  company: string,
+  matchedKeywords: string[],
+  carriesApplication: boolean
+): OpportunityItem {
+  const verdict = extractRegionVerdict(title, raw.description);
+  return {
+    id: `${category.id}:${hashString(raw.link)}`,
+    dedupeKey: dedupeKeyFor(company, title),
+    title,
+    link: raw.link,
+    pubDate: raw.pubDate,
+    description: raw.description.length > 800 ? `${raw.description.slice(0, 797)}...` : raw.description,
+    company,
+    region: verdict.region,
+    eligibility: verdict.eligibility,
+    eligibilityEvidence: verdict.evidence,
+    deadline: extractDeadline(raw.description),
+    salaryBand: extractSalaryBand(raw.description, title),
+    isOpportunity: carriesApplication,
+    routeTo: category.routeTo,
+    categoryId: category.id,
+    categoryName: category.displayName,
+    categoryIcon: category.icon,
+    sourceName: raw.sourceName,
+    matchedKeywords,
+    crawledAt: new Date().toISOString()
+  };
+}
+
 export function filterCategoryItems(
   rawItems: RawFeedItem[],
   category: CategoryDefinition,
   maxAgeDays: number = 3,
-  customConfig?: CategoryKeywordsConfig
+  customConfig?: CategoryKeywordsConfig,
+  sourceById: Map<string, FeedSource> = new Map()
 ): OpportunityItem[] {
   const matchedList: OpportunityItem[] = [];
   const now = Date.now();
@@ -65,11 +101,23 @@ export function filterCategoryItems(
       }
     }
 
-    // 2. Full Boolean AST Evaluation (if boolean query active)
+    const source = sourceById.get(item.sourceId);
+    const parseRule = source?.parseRule ?? "directPosting";
+    const carriesApplication = source?.carriesApplication ?? true;
+
+    // 2. Per-source parse rule. A rule that cannot find company and role drops the item.
+    const posting = applyParseRule(item, parseRule);
+    if (!posting) {
+      continue;
+    }
+    const title = posting.title;
+    const description = `${item.description}`;
+
+    // 3. Full Boolean AST Evaluation (if boolean query active)
     if (booleanAST) {
       const evalRes = evaluateBooleanAST(booleanAST, {
-        title: item.title,
-        description: item.description,
+        title,
+        description,
         sourceName: item.sourceName,
         link: item.link
       });
@@ -79,25 +127,16 @@ export function filterCategoryItems(
       }
 
       const uniqueTerms = Array.from(new Set(evalRes.matchedTerms.map(t => t.trim())));
+      const company = posting.company || extractCompany(title, description, item.link);
 
-      matchedList.push({
-        id: `${category.id}:${hashString(item.link)}`,
-        title: item.title,
-        link: item.link,
-        pubDate: item.pubDate,
-        description: item.description.length > 800 ? `${item.description.slice(0, 797)}...` : item.description,
-        categoryId: category.id,
-        categoryName: category.displayName,
-        categoryIcon: category.icon,
-        sourceName: item.sourceName,
-        matchedKeywords: uniqueTerms.length > 0 ? uniqueTerms : ["Boolean Match"],
-        crawledAt: new Date().toISOString()
-      });
+      matchedList.push(
+        buildItem(item, category, title, company, uniqueTerms.length > 0 ? uniqueTerms : ["Boolean Match"], carriesApplication)
+      );
       continue;
     }
 
-    // 3. Simple Keyword Matcher Evaluation
-    const textToMatch = `${item.title} ${item.description}`.toLowerCase();
+    // 4. Simple Keyword Matcher Evaluation
+    const textToMatch = `${title} ${description}`.toLowerCase();
 
     // Check Exclusions
     const isExcluded = activeExclude.some(regex => regex.test(textToMatch));
@@ -119,20 +158,9 @@ export function filterCategoryItems(
     }
 
     const uniqueMatchedTerms = Array.from(new Set(matchedTerms.map(t => t.trim())));
+    const company = posting.company || extractCompany(title, description, item.link);
 
-    matchedList.push({
-      id: `${category.id}:${hashString(item.link)}`,
-      title: item.title,
-      link: item.link,
-      pubDate: item.pubDate,
-      description: item.description.length > 800 ? `${item.description.slice(0, 797)}...` : item.description,
-      categoryId: category.id,
-      categoryName: category.displayName,
-      categoryIcon: category.icon,
-      sourceName: item.sourceName,
-      matchedKeywords: uniqueMatchedTerms,
-      crawledAt: new Date().toISOString()
-    });
+    matchedList.push(buildItem(item, category, title, company, uniqueMatchedTerms, carriesApplication));
   }
 
   return matchedList;

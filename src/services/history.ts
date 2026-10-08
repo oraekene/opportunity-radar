@@ -7,40 +7,32 @@ function getTodayString(): string {
   return d.toISOString().split("T")[0]; // YYYY-MM-DD
 }
 
-export async function saveDailyOpportunities(
-  env: Env,
-  items: OpportunityItem[]
-): Promise<void> {
-  if (!env.SEEN_OPPORTUNITIES || items.length === 0) return;
+/** RADAR_HISTORY holds the day rows. Merge on dedupeKey so re-runs replace, not duplicate. */
+export async function saveDailyOpportunities(env: Env, items: OpportunityItem[]): Promise<void> {
+  if (!env.RADAR_HISTORY || items.length === 0) return;
 
   const today = getTodayString();
   const dayKey = `history:day:${today}`;
 
   try {
-    // 1. Fetch existing items for today
     let existingItems: OpportunityItem[] = [];
-    const raw = await env.SEEN_OPPORTUNITIES.get(dayKey);
+    const raw = await env.RADAR_HISTORY.get(dayKey);
     if (raw) {
       try {
         existingItems = JSON.parse(raw);
       } catch {}
     }
 
-    // Merge by id
     const map = new Map<string, OpportunityItem>();
-    existingItems.forEach(item => map.set(item.id, item));
-    items.forEach(item => map.set(item.id, item));
+    existingItems.forEach(item => map.set(item.dedupeKey || item.id, item));
+    items.forEach(item => map.set(item.dedupeKey || item.id, item));
 
-    const combined = Array.from(map.values());
-
-    // Save with 60-day expiration TTL
-    await env.SEEN_OPPORTUNITIES.put(dayKey, JSON.stringify(combined), {
+    await env.RADAR_HISTORY.put(dayKey, JSON.stringify(Array.from(map.values())), {
       expirationTtl: 60 * 24 * 60 * 60
     });
 
-    // 2. Update dates index
     let dates: string[] = [];
-    const rawIndex = await env.SEEN_OPPORTUNITIES.get(DATES_INDEX_KEY);
+    const rawIndex = await env.RADAR_HISTORY.get(DATES_INDEX_KEY);
     if (rawIndex) {
       try {
         dates = JSON.parse(rawIndex);
@@ -50,37 +42,33 @@ export async function saveDailyOpportunities(
     if (!dates.includes(today)) {
       dates.unshift(today);
       if (dates.length > 30) dates = dates.slice(0, 30); // keep last 30 days
-      await env.SEEN_OPPORTUNITIES.put(DATES_INDEX_KEY, JSON.stringify(dates));
+      await env.RADAR_HISTORY.put(DATES_INDEX_KEY, JSON.stringify(dates));
     }
-  } catch (err) {
-    console.error("[History] Error saving daily opportunities:", err);
+  } catch (err: any) {
+    console.error(`[History] Error saving daily opportunities: ${err?.message || err}`);
   }
 }
 
-export async function getOpportunitiesForDay(
-  env: Env,
-  dateStr?: string
-): Promise<OpportunityItem[]> {
-  if (!env.SEEN_OPPORTUNITIES) return [];
+export async function getOpportunitiesForDay(env: Env, dateStr?: string): Promise<OpportunityItem[]> {
+  if (!env.RADAR_HISTORY) return [];
 
   const targetDate = dateStr || getTodayString();
-  const dayKey = `history:day:${targetDate}`;
 
   try {
-    const raw = await env.SEEN_OPPORTUNITIES.get(dayKey);
+    const raw = await env.RADAR_HISTORY.get(`history:day:${targetDate}`);
     if (!raw) return [];
     return JSON.parse(raw);
-  } catch (err) {
-    console.error(`[History] Error getting opportunities for ${targetDate}:`, err);
+  } catch (err: any) {
+    console.error(`[History] Error getting opportunities for ${targetDate}: ${err?.message || err}`);
     return [];
   }
 }
 
 export async function getAvailableDates(env: Env): Promise<string[]> {
-  if (!env.SEEN_OPPORTUNITIES) return [getTodayString()];
+  if (!env.RADAR_HISTORY) return [getTodayString()];
 
   try {
-    const raw = await env.SEEN_OPPORTUNITIES.get(DATES_INDEX_KEY);
+    const raw = await env.RADAR_HISTORY.get(DATES_INDEX_KEY);
     if (!raw) return [getTodayString()];
     const dates: string[] = JSON.parse(raw);
     return dates.length > 0 ? dates : [getTodayString()];

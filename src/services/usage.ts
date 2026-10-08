@@ -1,4 +1,4 @@
-import { Env, NotificationChannel, ProviderQuota, UserSettings } from "../types";
+import type { Env, NotificationChannel, ProviderQuota, UserSettings } from "../types";
 
 export function getCurrentMonthString(): string {
   const d = new Date();
@@ -10,11 +10,11 @@ function getUsageKey(provider: string, month: string): string {
 }
 
 export async function getProviderUsage(env: Env, provider: string): Promise<number> {
-  if (!env.SEEN_OPPORTUNITIES) return 0;
+  if (!env.RADAR_HISTORY) return 0;
   const month = getCurrentMonthString();
   const key = getUsageKey(provider, month);
   try {
-    const raw = await env.SEEN_OPPORTUNITIES.get(key);
+    const raw = await env.RADAR_HISTORY.get(key);
     return raw ? parseInt(raw, 10) || 0 : 0;
   } catch {
     return 0;
@@ -22,14 +22,14 @@ export async function getProviderUsage(env: Env, provider: string): Promise<numb
 }
 
 export async function incrementProviderUsage(env: Env, provider: string): Promise<number> {
-  if (!env.SEEN_OPPORTUNITIES) return 1;
+  if (!env.RADAR_HISTORY) return 1;
   const month = getCurrentMonthString();
   const key = getUsageKey(provider, month);
   try {
     const current = await getProviderUsage(env, provider);
     const updated = current + 1;
     // Set 60-day expiration so old monthly stats automatically clean up
-    await env.SEEN_OPPORTUNITIES.put(key, String(updated), {
+    await env.RADAR_HISTORY.put(key, String(updated), {
       expirationTtl: 60 * 24 * 60 * 60
     });
     return updated;

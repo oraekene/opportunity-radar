@@ -7,6 +7,13 @@ export interface RawFeedItem {
   pubDate: string;
   description: string;
   sourceName: string;
+  sourceId: string;
+}
+
+/** A fetch outcome. An empty item list with an error is a dead source, not an empty feed. */
+export interface FetchResult {
+  items: RawFeedItem[];
+  error?: string;
 }
 
 const parser = new XMLParser({
@@ -14,7 +21,10 @@ const parser = new XMLParser({
   attributeNamePrefix: "@_",
   textNodeName: "#text",
   trimValues: true,
-  cdataPropName: "__cdata"
+  cdataPropName: "__cdata",
+  // Some feeds trip the entity expansion limit and fail the whole parse.
+  // Named entities are decoded in cleanHtml instead.
+  processEntities: false
 });
 
 function extractText(val: any): string {
@@ -30,6 +40,8 @@ function extractText(val: any): string {
 function cleanHtml(raw: string): string {
   return raw
     .replace(/<[^>]*>?/gm, " ") // Strip HTML tags
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
@@ -40,7 +52,7 @@ function cleanHtml(raw: string): string {
     .trim();
 }
 
-function parseBreakoutListHtml(htmlText: string, sourceName: string): RawFeedItem[] {
+function parseBreakoutListHtml(htmlText: string, sourceName: string, sourceId: string): RawFeedItem[] {
   const items: RawFeedItem[] = [];
   const rowRegex = /<tr\s+class="row">([\s\S]*?)<\/tr>/gi;
   let match;
@@ -77,14 +89,15 @@ function parseBreakoutListHtml(htmlText: string, sourceName: string): RawFeedIte
         link,
         pubDate: new Date().toUTCString(),
         description: description || "High-growth breakout startup selected by top venture investors.",
-        sourceName
+        sourceName,
+        sourceId
       });
     }
   }
   return items;
 }
 
-async function fetchSomewhereJobs(source: FeedSource, controllerSignal?: AbortSignal): Promise<RawFeedItem[]> {
+async function fetchSomewhereJobs(source: FeedSource, controllerSignal?: AbortSignal): Promise<FetchResult> {
   try {
     const input = encodeURIComponent(JSON.stringify({ "0": { json: { query: "", industries: [], isSourcingUnit: null, countries: [] } } }));
     const url = `https://salarycalculator.somewheretypingtest.com/api/trpc/jobs.getJobs?batch=1&input=${input}`;
@@ -95,29 +108,40 @@ async function fetchSomewhereJobs(source: FeedSource, controllerSignal?: AbortSi
         "Accept": "application/json"
       }
     });
-    if (!res.ok) return [];
+    if (!res.ok) return { items: [], error: `HTTP ${res.status}` };
     const data = await res.json() as any;
     const jobs = data?.[0]?.result?.data?.json?.jobs || [];
+    if (jobs.length === 0) return { items: [], error: "Empty job list" };
 
-    return jobs.map((j: any) => {
-      const title = j.name ? `${cleanHtml(j.name)}${j.country ? ` (${j.country})` : ""}` : "Remote Opportunity";
-      const link = j.slug ? `https://recruitcrm.io/apply/${j.slug}` : "https://somewhere.com/jobs";
-      const desc = cleanHtml(j.job_description_text || "");
-      return {
-        title,
-        link,
-        pubDate: new Date().toUTCString(),
-        description: desc.substring(0, 1000) || "Remote opportunity on Somewhere.com",
-        sourceName: source.name
-      };
-    });
+    return {
+      items: jobs.map((j: any) => {
+        const company = cleanHtml(j.company_name || j.companyName || j.company?.name || "");
+        const title = j.name
+          ? `${company ? `${company} — ` : ""}${cleanHtml(j.name)}${j.country ? ` (${j.country})` : ""}`
+          : "Remote Opportunity";
+        const link = j.slug ? `https://recruitcrm.io/apply/${j.slug}` : "https://somewhere.com/jobs";
+        // The slug is the role, not the company, so seed the description with the company.
+        const desc = [company ? `Company: ${company}` : "", cleanHtml(j.job_description_text || "")]
+          .filter(Boolean)
+          .join(" ");
+        return {
+          title,
+          link,
+          pubDate: new Date().toUTCString(),
+          description: desc.substring(0, 1000) || "Remote opportunity on Somewhere.com",
+          sourceName: source.name,
+          sourceId: source.id
+        };
+      })
+    };
   } catch (err: any) {
-    console.error(`[Fetcher] Failed to fetch Somewhere jobs:`, err);
-    return [];
+    const msg = err?.message || String(err);
+    console.error(`[Fetcher] Failed to fetch Somewhere jobs:`, msg);
+    return { items: [], error: msg };
   }
 }
 
-export async function fetchFeedItems(source: FeedSource): Promise<RawFeedItem[]> {
+export async function fetchFeedItems(source: FeedSource): Promise<FetchResult> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12000); // 12-second timeout
 
@@ -136,13 +160,17 @@ export async function fetchFeedItems(source: FeedSource): Promise<RawFeedItem[]>
 
     if (!res.ok) {
       console.warn(`[Fetcher] Failed to fetch ${source.name} (${source.url}): HTTP ${res.status}`);
-      return [];
+      return { items: [], error: `HTTP ${res.status}` };
     }
 
     const rawText = await res.text();
 
     if (source.type === "html" || source.url.includes("breakoutlist.com")) {
-      return parseBreakoutListHtml(rawText, source.name);
+      const items = parseBreakoutListHtml(rawText, source.name, source.id);
+      // A table-scraped source that yields nothing is broken, not quiet.
+      return items.length > 0
+        ? { items }
+        : { items, error: "HTML parse produced 0 rows" };
     }
 
     const parsed = parser.parse(rawText);
@@ -166,7 +194,8 @@ export async function fetchFeedItems(source: FeedSource): Promise<RawFeedItem[]>
             link,
             pubDate,
             description,
-            sourceName: source.name
+            sourceName: source.name,
+            sourceId: source.id
           });
         }
       }
@@ -198,16 +227,19 @@ export async function fetchFeedItems(source: FeedSource): Promise<RawFeedItem[]>
             link,
             pubDate,
             description,
-            sourceName: source.name
+            sourceName: source.name,
+            sourceId: source.id
           });
         }
       }
     }
 
-    return items;
+// A valid feed with no entries is quiet, not broken. Only real failures carry an error.
+return { items };
   } catch (err: any) {
-    console.error(`[Fetcher] Error parsing ${source.name}: ${err?.message || err}`);
-    return [];
+    const msg = err?.message || String(err);
+    console.error(`[Fetcher] Error parsing ${source.name}: ${msg}`);
+    return { items: [], error: msg };
   } finally {
     clearTimeout(timeoutId);
   }

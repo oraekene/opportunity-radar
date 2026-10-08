@@ -1,10 +1,11 @@
 import { CATEGORIES } from "../config/categories";
 import { UserSettings } from "../types";
 
-export function renderDashboardHtml(settings: UserSettings, availableDates: string[]): string {
+export function renderDashboardHtml(settings: UserSettings, availableDates: string[], consumedKeys: string[] = []): string {
   const categoriesJson = JSON.stringify(CATEGORIES);
   const settingsJson = JSON.stringify(settings);
   const datesJson = JSON.stringify(availableDates);
+  const consumedJson = JSON.stringify(consumedKeys);
 
   return `<!DOCTYPE html>
 <html lang="en" class="h-full bg-slate-900 text-slate-100">
@@ -582,6 +583,7 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
     const INITIAL_CATEGORIES = ${categoriesJson};
     let CURRENT_SETTINGS = ${settingsJson};
     let AVAILABLE_DATES = ${datesJson};
+    let CONSUMED_KEYS = new Set(${consumedJson});
     let ALL_OPPORTUNITIES = [];
 
     // Tabs
@@ -1081,8 +1083,24 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
           \`<span class="px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20 text-[10px] font-mono">\${k}</span>\`
         ).join(" ");
 
+        const elig = item.eligibility || "unknown";
+        const eligColor = elig === "open" ? "emerald" : elig === "restricted" ? "rose" : "slate";
+        const eligLabel = item.eligibilityEvidence ? \`\${elig}: "\${item.eligibilityEvidence}"\` : elig;
+        const routeLabel = item.routeTo === "cold_email" ? "cold-email" : item.routeTo === "none" ? "no route" : item.routeTo;
+        const isConsumed = CONSUMED_KEYS.has(item.dedupeKey);
+
+        const metaBadges = [
+          item.company ? \`<span class="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20 text-[10px] font-mono">🏛️ \${item.company}</span>\` : "",
+          item.region ? \`<span class="px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-300 border border-slate-500/20 text-[10px] font-mono">🌍 \${item.region}</span>\` : "",
+          \`<span class="px-1.5 py-0.5 rounded bg-\${eligColor}-500/10 text-\${eligColor}-400 border border-\${eligColor}-500/20 text-[10px] font-mono">\${eligLabel}</span>\`,
+          item.salaryBand ? \`<span class="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono">💵 \${item.salaryBand}</span>\` : "",
+          item.deadline ? \`<span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-mono">⏳ \${item.deadline}</span>\` : "",
+          \`<span class="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/20 text-[10px] font-mono">→ \${routeLabel}</span>\`,
+          item.isOpportunity === false ? \`<span class="px-1.5 py-0.5 rounded bg-slate-700/40 text-slate-400 border border-slate-600/30 text-[10px] font-mono">news, no application</span>\` : ""
+        ].filter(Boolean).join(" ");
+
         return \`
-          <tr class="hover:bg-slate-900/60 transition group">
+          <tr class="hover:bg-slate-900/60 transition group \${isConsumed ? "opacity-60" : ""}">
             <td class="py-3 px-4 align-top">
               <span class="inline-flex items-center gap-1.5 font-medium text-slate-200">
                 <span>\${item.categoryIcon}</span>
@@ -1091,26 +1109,54 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
             </td>
             <td class="py-3 px-4 align-top space-y-1.5">
               <a href="\${item.link}" target="_blank" class="font-semibold text-slate-100 hover:text-orange-400 transition text-sm">
-                \${item.title}
+                \${item.company ? item.company + " — " : ""}\${item.title}
               </a>
               <div class="text-[11px] text-slate-400 line-clamp-2 group-hover:line-clamp-none transition">
                 \${item.description}
               </div>
+              <div class="pt-1 flex flex-wrap gap-1">\${metaBadges}</div>
               <div class="pt-1 flex flex-wrap gap-1">\${kwBadges}</div>
             </td>
             <td class="py-3 px-4 align-top text-slate-400 space-y-1">
               <div class="font-medium text-slate-300">\${item.sourceName}</div>
               <div class="text-[10px] text-slate-500">\${item.pubDate || "Recently added"}</div>
+              <div class="text-[10px] text-slate-600 font-mono">\${item.dedupeKey}</div>
             </td>
-            <td class="py-3 px-4 align-top text-right">
+            <td class="py-3 px-4 align-top text-right space-y-1.5">
               <a href="\${item.link}" target="_blank" 
                 class="inline-block px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white font-medium text-[11px] transition shadow">
                 Apply ↗
               </a>
+              <div>
+                <button onclick="markActed(this)" data-key="\${item.dedupeKey}"
+                  class="px-2 py-1 rounded text-[10px] font-medium border transition \${isConsumed
+                    ? "bg-emerald-600/20 text-emerald-300 border-emerald-500/40"
+                    : "bg-slate-800 text-slate-400 border-slate-700 hover:border-emerald-500/40 hover:text-emerald-300"}">
+                  \${isConsumed ? "✓ Acted" : "Mark acted"}
+                </button>
+              </div>
             </td>
           </tr>
         \`;
       }).join("");
+    }
+
+    async function markActed(btn) {
+      const dedupeKey = btn.dataset.key || "";
+      try {
+        const res = await fetch("/api/consumed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dedupeKey, title: "", company: "", categoryId: "" })
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        CONSUMED_KEYS.add(dedupeKey);
+        btn.textContent = "✓ Acted";
+        btn.className = "px-2 py-1 rounded text-[10px] font-medium border transition bg-emerald-600/20 text-emerald-300 border-emerald-500/40";
+        btn.closest("tr").classList.add("opacity-60");
+      } catch (err) {
+        btn.textContent = "Failed";
+      }
     }
 
     searchInput.addEventListener("input", renderTable);
@@ -1145,15 +1191,33 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
         const data = await res.json();
         let logHtml = \`<div class="text-emerald-400">✓ Crawl cycle completed!</div>\`;
         data.summary.forEach(s => {
-          logHtml += \`<div>• \${s.category}: fetched \${s.fetched}, matched \${s.matched}, unseen \${s.unseen}</div>\`;
+          const failed = s.sourcesFailed
+            ? \`<span class="text-rose-400"> (\${s.sourcesFailed} source failed)</span>\`
+            : "";
+          logHtml += \`<div>• \${s.category}: fetched \${s.totalFetched}, matched \${s.matchedCount}, unseen \${s.unseenCount}\${failed}</div>\`;
         });
+        if (data.sourcesFailed?.length > 0) {
+          logHtml += \`<div class="text-rose-400 font-bold mt-1">\${data.sourcesFailedCount} source(s) failed or degraded:</div>\`;
+          data.sourcesFailed.forEach(f => {
+            logHtml += \`<div class="text-rose-300 pl-3">• \${f.sourceName}: \${f.reason}</div>\`;
+          });
+        }
+        if (data.kvErrors > 0) {
+          logHtml += \`<div class="text-amber-400">⚠ \${data.kvErrors} KV dedupe read error(s); items were not dropped</div>\`;
+        }
         if (!dryRun) {
           logHtml += \`<div class="text-orange-400 font-bold mt-1">Dispatched \${data.dispatched?.dispatchedCount || 0} messages!</div>\`;
+          if (data.dispatched?.suppressed > 0) {
+            logHtml += \`<div class="text-slate-400">Suppressed \${data.dispatched.suppressed} (route=none or restricted)</div>\`;
+          }
           if (data.dispatched?.providerUsed) {
             logHtml += \`<div class="text-emerald-300">Provider used: \${data.dispatched.providerUsed}</div>\`;
           }
           if (data.dispatched?.errors?.length > 0) {
             logHtml += \`<div class="text-rose-400">Errors: \${data.dispatched.errors.join(", ")}</div>\`;
+          }
+          if (data.webhook) {
+            logHtml += \`<div class="text-\${data.webhook.ok ? "emerald-300" : data.webhook.skipped ? "slate-400" : "rose-400"}">Webhook: \${data.webhook.ok ? "pushed" : data.webhook.skipped ? "not configured" : data.webhook.error}</div>\`;
           }
         }
         logContent.innerHTML = logHtml;

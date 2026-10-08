@@ -1,11 +1,18 @@
 import { CategoryDefinition } from "../types";
 
+// Per-source defaults: parseRule is "directPosting" and carriesApplication is
+// true unless the source says otherwise. Only the exceptions are annotated.
+//
+// Removed 2026-10-07: remote_ok. remoteok.com retired /remote-jobs.rss and now
+// answers HTTP 410. RemoteOK still has a JSON API at remoteok.com/api if you
+// want the coverage back; it needs a new source type.
 export const CATEGORIES: CategoryDefinition[] = [
   // 1. Grants & Fellowships
   {
     id: "grants_fellowships",
     displayName: "Grants & Fellowships",
     icon: "💰",
+    routeTo: "application",
     sources: [
       {
         id: "od_grants",
@@ -46,6 +53,7 @@ export const CATEGORIES: CategoryDefinition[] = [
     id: "scholarships",
     displayName: "Scholarships",
     icon: "🎓",
+    routeTo: "application",
     sources: [
       {
         id: "od_scholarships",
@@ -76,6 +84,7 @@ export const CATEGORIES: CategoryDefinition[] = [
     id: "competitions_hackathons",
     displayName: "Competitions, Hackathons & Pitches",
     icon: "⚡",
+    routeTo: "application",
     sources: [
       {
         id: "od_competitions",
@@ -105,42 +114,50 @@ export const CATEGORIES: CategoryDefinition[] = [
     id: "angel_startup_funding",
     displayName: "Angel & Startup Funding",
     icon: "🚀",
+    routeTo: "none",
     sources: [
       {
         id: "disrupt_africa",
         name: "Disrupt Africa - Funding",
-        url: "https://disruptafrica.com/feed/"
+        url: "https://disruptafrica.com/feed/",
+        carriesApplication: false
       },
       {
         id: "vc_cafe",
         name: "VC Cafe",
-        url: "https://www.vccafe.com/feed/"
+        url: "https://www.vccafe.com/feed/",
+        carriesApplication: false
       },
       {
         id: "eu_startups",
         name: "EU-Startups",
-        url: "https://www.eu-startups.com/feed/"
+        url: "https://www.eu-startups.com/feed/",
+        carriesApplication: false
       },
       {
         id: "techstars_news",
         name: "Techstars News",
-        url: "https://www.techstars.com/newsroom/rss.xml"
+        url: "https://www.techstars.com/newsroom/rss.xml",
+        carriesApplication: false
       },
       {
         id: "founders_you_should_know",
         name: "Founders You Should Know",
-        url: "https://newsletter.foundersysk.com/feed"
+        url: "https://newsletter.foundersysk.com/feed",
+        carriesApplication: false
       },
       {
         id: "breakout_list",
         name: "Breakout List",
         url: "https://breakoutlist.com",
-        type: "html"
+        type: "html",
+        carriesApplication: false
       },
       {
         id: "ramp_builders",
         name: "Ramp Builders & Spend",
-        url: "https://builders.ramp.com/rss.xml"
+        url: "https://builders.ramp.com/rss.xml",
+        carriesApplication: false
       }
     ],
     keywords: {
@@ -161,6 +178,7 @@ export const CATEGORIES: CategoryDefinition[] = [
     id: "freelance_gigs",
     displayName: "Freelance, Gigs & Contracts",
     icon: "🛠️",
+    routeTo: "cold_email",
     sources: [
       {
         id: "wwr_contract",
@@ -180,7 +198,8 @@ export const CATEGORIES: CategoryDefinition[] = [
       {
         id: "hn_freelance",
         name: "HN Seeking Freelancer",
-        url: "https://hnrss.org/whoishiring/freelance"
+        url: "https://hnrss.org/whoishiring/freelance",
+        parseRule: "hnComment"
       }
     ],
     keywords: {
@@ -200,16 +219,19 @@ export const CATEGORIES: CategoryDefinition[] = [
     id: "remote_jobs",
     displayName: "Remote Tech & Product Jobs",
     icon: "🌍",
+    routeTo: "cold_email",
     sources: [
       {
         id: "yc_jobs",
         name: "Y Combinator & HN Jobs",
-        url: "https://hnrss.org/jobs"
+        url: "https://hnrss.org/jobs",
+        parseRule: "hnComment"
       },
       {
         id: "hn_who_is_hiring",
         name: "Hacker News - Who's Hiring",
-        url: "https://hnrss.org/whoishiring/jobs"
+        url: "https://hnrss.org/whoishiring/jobs",
+        parseRule: "hnComment"
       },
       {
         id: "lennys_jobs",
@@ -234,18 +256,13 @@ export const CATEGORIES: CategoryDefinition[] = [
       {
         id: "wwr_product",
         name: "We Work Remotely - Product",
-        url: "https://weworkremotely.com/categories/remote-product-management-jobs.rss"
+        url: "https://weworkremotely.com/categories/remote-product-jobs.rss"
       },
       {
         id: "somewhere_jobs",
         name: "Somewhere.com Jobs",
         url: "https://somewhere.com/jobs",
         type: "json"
-      },
-      {
-        id: "remote_ok",
-        name: "RemoteOK",
-        url: "https://remoteok.com/remote-jobs.rss"
       },
       {
         id: "jobspresso",

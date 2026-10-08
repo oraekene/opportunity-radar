@@ -1,5 +1,6 @@
-import { OpportunityItem, CategoryDefinition, Env, UserSettings, NotificationChannel } from "../types";
+import type { OpportunityItem, CategoryDefinition, Env, UserSettings, NotificationChannel } from "../types";
 import { getProviderUsage, incrementProviderUsage } from "./usage";
+import { selectSendable } from "./routing";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -9,7 +10,19 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export function formatIndividualMessage(item: OpportunityItem, dashboardUrl?: string): string {
   let msg = `${item.categoryIcon} *[${item.categoryName.toUpperCase()}]*\n`;
   msg += `*${item.title}*\n\n`;
+  if (item.company) {
+    msg += `🏛️ *Company:* ${item.company}\n`;
+  }
   msg += `🏢 *Source:* ${item.sourceName}\n`;
+  if (item.region || item.eligibility !== "unknown") {
+    msg += `🌍 *Region:* ${item.region || "unspecified"} (${item.eligibility}${item.eligibilityEvidence ? `: "${item.eligibilityEvidence}"` : ""})\n`;
+  }
+  if (item.deadline) {
+    msg += `⏳ *Deadline:* ${item.deadline}\n`;
+  }
+  if (item.salaryBand) {
+    msg += `💵 *Salary:* ${item.salaryBand}\n`;
+  }
   if (item.pubDate) {
     msg += `📅 *Date:* ${item.pubDate}\n`;
   }
@@ -43,9 +56,18 @@ export function formatDigestMessage(
 
   items.slice(0, 5).forEach((item, index) => {
     message += `${index + 1}️⃣ *${item.title}*\n`;
+    if (item.company) {
+      message += `• Company: ${item.company}\n`;
+    }
     message += `• Source: ${item.sourceName}\n`;
-    if (item.matchedKeywords.length > 0) {
-      message += `• Keywords: ${item.matchedKeywords.join(", ")}\n`;
+    if (item.region || item.eligibility !== "unknown") {
+      message += `• Region: ${item.region || "unspecified"} (${item.eligibility})\n`;
+    }
+    if (item.deadline) {
+      message += `• Deadline: ${item.deadline}\n`;
+    }
+    if (item.salaryBand) {
+      message += `• Salary: ${item.salaryBand}\n`;
     }
     message += `• Link: ${item.link}\n\n`;
   });
@@ -402,6 +424,49 @@ async function dispatchWithRouting(
 }
 
 /**
+ * POST new items to a URL you control. This is the seam downstream polls, and
+ * it removes the need to read messages. One batch per run, grouped by route.
+ */
+export async function pushWebhook(
+  items: OpportunityItem[],
+  settings: UserSettings,
+  env: Env,
+  dashboardUrl?: string
+): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  const url = (settings.webhookUrl || env.RADAR_WEBHOOK_URL || "").trim();
+  if (!url) return { ok: false, skipped: true };
+
+  const payload = {
+    type: "opportunity.batch",
+    sentAt: new Date().toISOString(),
+    dashboardUrl,
+    items,
+    routes: {
+      application: items.filter(i => i.routeTo === "application").map(i => i.dedupeKey),
+      cold_email: items.filter(i => i.routeTo === "cold_email").map(i => i.dedupeKey)
+    }
+  };
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`[Webhook] HTTP ${res.status}: ${errText.slice(0, 200)}`);
+      return { ok: false, error: `Webhook HTTP ${res.status}` };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.error(`[Webhook] POST to ${url} failed: ${msg}`);
+    return { ok: false, error: `Webhook: ${msg}` };
+  }
+}
+
+/**
  * Master Opportunity Dispatcher
  */
 export async function dispatchOpportunities(
@@ -409,16 +474,26 @@ export async function dispatchOpportunities(
   settings: UserSettings,
   env: Env,
   dashboardUrl?: string
-): Promise<{ dispatchedCount: number; providerUsed?: string; errors: string[] }> {
+): Promise<{ dispatchedCount: number; providerUsed?: string; errors: string[]; suppressed: number }> {
   if (items.length === 0) {
-    return { dispatchedCount: 0, errors: [] };
+    return { dispatchedCount: 0, errors: [], suppressed: 0 };
+  }
+
+  // 0. Gate on what may leave the radar: no route, no application, or restricted.
+  const sendable = selectSendable(items, settings);
+  const suppressed = items.length - sendable.length;
+  if (suppressed > 0) {
+    console.log(`[Notifier] Suppressed ${suppressed} items (routeTo=none, news, or eligibility=restricted)`);
+  }
+  if (sendable.length === 0) {
+    return { dispatchedCount: 0, errors: [], suppressed };
   }
 
   // 1. Enforce per-source limit
   const sourceCountMap = new Map<string, number>();
   const filteredItems: OpportunityItem[] = [];
 
-  for (const item of items) {
+  for (const item of sendable) {
     const currentFromSource = sourceCountMap.get(item.sourceName) || 0;
     if (currentFromSource < settings.maxPerSource) {
       filteredItems.push(item);
@@ -470,6 +545,7 @@ export async function dispatchOpportunities(
         id: catId,
         displayName: catItems[0].categoryName,
         icon: catItems[0].categoryIcon,
+        routeTo: catItems[0].routeTo,
         sources: [],
         keywords: { include: [], exclude: [] }
       };
@@ -491,5 +567,5 @@ export async function dispatchOpportunities(
     }
   }
 
-  return { dispatchedCount, providerUsed: lastProviderUsed, errors };
+  return { dispatchedCount, providerUsed: lastProviderUsed, errors, suppressed };
 }

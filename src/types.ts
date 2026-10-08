@@ -1,9 +1,27 @@
+/** Whether you can actually apply, judged from the text, not from a keyword. */
+export type Eligibility = "open" | "restricted" | "unknown";
+
+/** How a source shapes its payload. HN Who-is-Hiring is not a job posting feed. */
+export type ParseRule = "directPosting" | "hnComment";
+
+/** Where an item should land downstream. "none" means do not send it. */
+export type RouteTo = "application" | "cold_email" | "none";
+
 export interface OpportunityItem {
   id: string;
+  dedupeKey: string;
   title: string;
   link: string;
   pubDate: string;
   description: string;
+  company: string;
+  region: string;
+  eligibility: Eligibility;
+  eligibilityEvidence: string;
+  deadline: string;
+  salaryBand: string;
+  isOpportunity: boolean;
+  routeTo: RouteTo;
   categoryId: string;
   categoryName: string;
   categoryIcon: string;
@@ -22,12 +40,16 @@ export interface FeedSource {
   name: string;
   url: string;
   type?: "rss" | "html" | "json";
+  parseRule?: ParseRule;
+  /** false when the feed carries news but no application to make. */
+  carriesApplication?: boolean;
 }
 
 export interface CategoryDefinition {
   id: string;
   displayName: string;
   icon: string;
+  routeTo: RouteTo;
   whatsappGroupChatId?: string;
   telegramTopicId?: number;
   sources: FeedSource[];
@@ -70,6 +92,12 @@ export interface UserSettings {
   notificationTarget: NotificationChannel;
   routerPriority: NotificationChannel[];
 
+  // POST new items to a URL you control. This is the seam downstream polls.
+  webhookUrl?: string;
+
+  // Off by default: the radar shows everything, it only sends what you asked for.
+  sendRestricted?: boolean;
+
   // Kapso.ai (2,000 free/month)
   kapsoApiKey?: string;
   kapsoPhoneNumberId?: string;
@@ -104,7 +132,12 @@ export interface UserSettings {
 }
 
 export interface Env {
-  SEEN_OPPORTUNITIES: KVNamespace;
+  /** 30-day seen set. Short-lived dedupe memory. */
+  RADAR_SEEN: KVNamespace;
+  /** Daily history, dates index, user settings, provider quota counters. */
+  RADAR_HISTORY: KVNamespace;
+  /** What you actually acted on. The radar never writes here on its own. */
+  RADAR_CONSUMED: KVNamespace;
 
   // Optional environment defaults
   NOTIFIER_TARGET?: string;
@@ -137,4 +170,7 @@ export interface Env {
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
   DISCORD_WEBHOOK_URL?: string;
+
+  // Webhook push target (secret, set with wrangler secret put)
+  RADAR_WEBHOOK_URL?: string;
 }

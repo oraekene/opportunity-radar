@@ -26,6 +26,9 @@ export function getDefaultSettings(env: Env): UserSettings {
       "telegram"
     ],
 
+    webhookUrl: env.RADAR_WEBHOOK_URL || "",
+    sendRestricted: false,
+
     // Kapso.ai (2,000 free/month)
     kapsoApiKey: env.KAPSO_API_KEY || "",
     kapsoPhoneNumberId: env.KAPSO_PHONE_NUMBER_ID || "",
@@ -62,12 +65,12 @@ export function getDefaultSettings(env: Env): UserSettings {
 
 export async function getSettings(env: Env): Promise<UserSettings> {
   const defaults = getDefaultSettings(env);
-  if (!env.SEEN_OPPORTUNITIES) {
+  if (!env.RADAR_HISTORY) {
     return defaults;
   }
 
   try {
-    const raw = await env.SEEN_OPPORTUNITIES.get(SETTINGS_KEY);
+    const raw = await env.RADAR_HISTORY.get(SETTINGS_KEY);
     if (!raw) return defaults;
     const parsed = JSON.parse(raw);
     return {
@@ -99,8 +102,8 @@ export async function saveSettings(env: Env, newSettings: Partial<UserSettings>)
     routerPriority: newSettings.routerPriority || current.routerPriority
   };
 
-  if (env.SEEN_OPPORTUNITIES) {
-    await env.SEEN_OPPORTUNITIES.put(SETTINGS_KEY, JSON.stringify(merged));
+  if (env.RADAR_HISTORY) {
+    await env.RADAR_HISTORY.put(SETTINGS_KEY, JSON.stringify(merged));
   }
 
   return merged;

@@ -2,7 +2,112 @@
 
 An automated, multi-source opportunities, grants, scholarships, competitions, freelance gigs, and jobs crawler hosted on **Cloudflare Workers**.
 
-It crawls opportunities across 6 distinct categories, runs dedicated **Keyword Query engines** with inclusion and exclusion filters, deduplicates using **Cloudflare KV**, and dispatches formatted alerts directly to **WhatsApp** (or Telegram / Discord).
+It crawls opportunities across 6 distinct categories, runs dedicated **Keyword Query engines** with inclusion and exclusion filters, deduplicates using **Cloudflare KV**, and dispatches formatted alerts to **WhatsApp** (or Telegram / Discord) and to a **webhook** you control.
+
+---
+
+## 🔍 What each item carries
+
+The radar lifts these out of the feed text instead of leaving them in prose:
+
+| Field | Where it comes from |
+| :--- | :--- |
+| `company` | A `Company:` label, the title, or the apply link host |
+| `region` | The longest region phrase in the text |
+| `eligibility` | `open`, `restricted`, or `unknown`, plus `eligibilityEvidence`, the phrase that decided it |
+| `deadline` | Prose such as "applications close on 15 April 2026" |
+| `salaryBand` | A currency range such as `$150,000 - $180,000` |
+| `isOpportunity` | Declared by the source. News sources set it false |
+| `routeTo` | `application`, `cold_email`, or `none` |
+| `dedupeKey` | Normalised company plus title, so one job on two boards is one row |
+
+A region on its own is never treated as eligibility. A "South Africa" role reads
+as `unknown`, not promising. `restricted` items are shown but not sent unless you
+set `sendRestricted` to true.
+
+Per source you can set `parseRule: "hnComment"` (Hacker News Who-is-Hiring
+comments, where company and role are lifted out of the pipe-delimited body and
+anything missing either is dropped) and `carriesApplication: false`.
+
+---
+
+## 🧭 Per-category routing
+
+`routeTo` in `src/config/categories.ts` decides where a category lands:
+
+* `grants_fellowships`, `scholarships`, `competitions_hackathons` → `application`
+* `remote_jobs`, `freelance_gigs` → `cold_email`
+* `angel_startup_funding` → `none`. Funding news stays in the Daily Table and is
+  never dispatched.
+
+---
+
+## 🔑 Secrets
+
+No credential name is committed. `wrangler.jsonc` holds only `NOTIFIER_TARGET`.
+Set every key, token, phone, and URL with `wrangler secret put`:
+
+```bash
+npx wrangler secret put KAPSO_API_KEY
+npx wrangler secret put KAPSO_PHONE_NUMBER_ID
+npx wrangler secret put KAPSO_RECIPIENT_PHONE
+npx wrangler secret put META_PHONE_NUMBER_ID
+npx wrangler secret put META_ACCESS_TOKEN
+npx wrangler secret put META_RECIPIENT_PHONE
+npx wrangler secret put TWILIO_ACCOUNT_SID
+npx wrangler secret put TWILIO_AUTH_TOKEN
+npx wrangler secret put TWILIO_FROM_PHONE
+npx wrangler secret put TWILIO_TO_PHONE
+npx wrangler secret put CALLMEBOT_PHONE
+npx wrangler secret put CALLMEBOT_APIKEY
+npx wrangler secret put GREENAPI_INSTANCE_ID
+npx wrangler secret put GREENAPI_API_TOKEN
+npx wrangler secret put TELEGRAM_BOT_TOKEN
+npx wrangler secret put TELEGRAM_CHAT_ID
+npx wrangler secret put DISCORD_WEBHOOK_URL
+npx wrangler secret put RADAR_WEBHOOK_URL
+```
+
+Settings saved from the Control Plane live in KV and still win over these
+defaults.
+
+---
+
+## 🔌 Webhook push
+
+Set `RADAR_WEBHOOK_URL` (or `webhookUrl` in settings). Each live crawl POSTs one
+batch to that URL:
+
+```json
+{
+  "type": "opportunity.batch",
+  "sentAt": "2026-10-07T21:00:00.000Z",
+  "items": [ { "id": "...", "dedupeKey": "acme labs::senior data engineer", "routeTo": "cold_email", "eligibility": "open", "company": "Acme Labs", "deadline": "15 April 2026", "salaryBand": "$150,000 - $180,000", "link": "https://..." } ],
+  "routes": { "application": ["..."], "cold_email": ["acme labs::senior data engineer"] }
+}
+```
+
+`routes` lists the dedupe keys per pipeline, so a downstream poller can fan out
+without re-reading the whole batch.
+
+---
+
+## 🗂 KV namespaces
+
+| Binding | Holds | TTL |
+| :--- | :--- | :--- |
+| `RADAR_SEEN` | Seen set, keyed by both `id` and `dedupeKey` | 30 days |
+| `RADAR_HISTORY` | Daily rows, dates index, settings, provider quota counters | 60 days |
+| `RADAR_CONSUMED` | What you acted on. Only `POST /api/consumed` writes here | 90 days |
+
+Marking something consumed is a separate act from receiving it, because the
+radar cannot tell "messaged to you" from "drafted and sent":
+
+```bash
+curl -X POST https://<worker>/api/consumed \
+  -H 'Content-Type: application/json' \
+  -d '{"dedupeKey":"acme labs::senior data engineer","company":"Acme Labs","note":"applied"}'
+```
 
 ---
 
@@ -46,7 +151,7 @@ In Telegram, you can enable **Topics** (Forums) in any group for free:
 1. Create a Telegram Group and enable **Topics** in Group Settings.
 2. Create topics for: `#Grants`, `#Startup-Funding`, `#Hackathons`, `#Freelance`, `#Remote-Jobs`.
 3. Add a bot from `@BotFather` as an admin.
-4. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `wrangler.jsonc`.
+4. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` with `wrangler secret put`.
 
 ---
 
@@ -68,19 +173,43 @@ In Telegram, you can enable **Topics** (Forums) in any group for free:
    * Run Live Crawl & Dispatch: `http://localhost:8787/run`
    * Send Test Alert: `http://localhost:8787/test-alert`
 
+4. **Typecheck and test**:
+   ```bash
+   npm run typecheck
+   npm test
+   ```
+
 ---
 
 ## 🚢 Deploy to Cloudflare
 
-1. **Create the KV Namespace for Deduplication**:
+1. **Create the KV namespaces** (skip if they already exist):
    ```bash
-   npx wrangler kv namespace create SEEN_OPPORTUNITIES
+   npx wrangler kv namespace create RADAR_SEEN
+   npx wrangler kv namespace create RADAR_HISTORY
+   npx wrangler kv namespace create RADAR_CONSUMED
    ```
-   Copy the generated `id` into `wrangler.jsonc` under `kv_namespaces`.
+   Copy each generated `id` into `wrangler.jsonc` under `kv_namespaces`.
 
-2. **Deploy**:
+2. **Set the secrets** (see [Secrets](#-secrets) above).
+
+3. **Deploy**:
    ```bash
    npx wrangler deploy
    ```
 
-The Cron Trigger will now run automatically at **7:00 AM, 2:00 PM, and 8:00 PM UTC** every single day!
+The Cron Trigger runs every 8 hours: 00:00, 08:00 and 16:00 UTC.
+
+---
+
+## 📡 Visibility
+
+`/run` reports `sourcesFailed`, a list of every source that errored or returned
+nothing. A source that silently stops is now visible in the Control Plane run
+log instead of disappearing into `Promise.allSettled`. KV dedupe read failures
+are counted as `kvErrors`, and restricted or unrouted items are counted as
+`dispatched.suppressed`.
+
+`/api/opportunities` is rate limited to 60 requests per minute per IP, and
+`/run` to 5 per 5 minutes, so an unauthenticated crawler cannot drive the
+feeds.
