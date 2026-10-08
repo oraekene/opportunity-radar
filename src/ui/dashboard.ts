@@ -232,11 +232,11 @@ export function renderDashboardHtml(settings: UserSettings, availableDates: stri
                 </div>
                 <div>
                   <label class="block text-[11px] font-medium text-slate-300 mb-1">Phone Number ID</label>
-                  <input type="text" id="kapsoPhoneNumberId" placeholder="597907523413541" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500">
+                  <input type="text" id="kapsoPhoneNumberId" placeholder="Kapso phone number id" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500">
                 </div>
                 <div>
                   <label class="block text-[11px] font-medium text-slate-300 mb-1">Recipient Phone</label>
-                  <input type="text" id="kapsoRecipientPhone" placeholder="2348149386184" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500">
+                  <input type="text" id="kapsoRecipientPhone" placeholder="Recipient number, digits only" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500">
                 </div>
                 <div>
                   <label class="block text-[11px] font-medium text-slate-300 mb-1">Monthly Quota Cap</label>
