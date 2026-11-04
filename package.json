@@ -9,6 +9,7 @@
     "types": "wrangler types",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
+    "check:ui": "esbuild tools/check-dashboard.ts --bundle --platform=node --format=esm --outfile=.checkdash.mjs --log-level=error && node .checkdash.mjs dist/dashboard.html && node --check dist/dashboard.js",
     "calibrate": "esbuild tools/calibrate.ts --bundle --platform=node --format=esm --outfile=.calib.mjs --log-level=error && node .calib.mjs"
   },
   "dependencies": {

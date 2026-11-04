@@ -20,5 +20,6 @@ __pycache__/
 # Calibration sweep scratch output (regenerate with npm run calibrate)
 .calib.mjs
 .calibration.txt
+.checkdash.mjs
 .dashboard-check.js
 .harness.cjs
