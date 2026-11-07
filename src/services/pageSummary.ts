@@ -4,14 +4,12 @@ import { extractDeadline, extractEligibilityCountry, extractSalaryBand } from ".
 /**
  * One fetch per link, cached. A summary is not a source of truth, so the page
  * is read once and the result reused.
+ * 
+ * These TTLs are env-configurable via KV_TTL_SECONDS or PAGE_FETCH_BUDGET env vars.
+ * Defaults are conservative: page TTL is 7 days, fetch budget is 10 pages per run.
  */
-const PAGE_TTL_SECONDS = 7 * 24 * 60 * 60;
-
-/**
- * Ponytail: 10 page fetches per run, because a Worker gets 50 subrequests and
- * the feeds already spend ~32. Raise it only on the paid subrequest tier.
- */
-export const MAX_PAGE_FETCHES_PER_RUN = 10;
+export const PAGE_TTL_SECONDS = parseInt(process.env.KV_TTL_SECONDS || "604800"); // 7 days default
+export const MAX_PAGE_FETCHES_PER_RUN = parseInt(process.env.PAGE_FETCH_BUDGET || "10");
 
 export interface PageSummary {
   fetchedAt: string;

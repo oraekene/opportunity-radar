@@ -124,8 +124,9 @@ export async function clearChannelBlocked(env: Env, provider: NotificationChanne
  * business number. Our own outbound message cannot open it, so no amount of
  * automated "hello" from this Worker will restore delivery. What automation
  * can do is notice that the customer wrote, and hold sends until it did.
+ * Configurable via WINDOW_HOURS env var (default: 24).
  */
-const WINDOW_HOURS = 24;
+export const WINDOW_HOURS = parseInt(process.env.WINDOW_HOURS || "24");
 
 const inboundKey = (provider: NotificationChannel) => `window_inbound:${provider}`;
 

@@ -1,6 +1,7 @@
 import { OpportunityItem, Env } from "../types";
 
-const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60; // 30-day TTL on the seen set
+// Seen set TTL; configurable via SEEN_TTL_DAYS env var.
+export const THIRTY_DAYS_SECONDS = (parseInt(process.env.SEEN_TTL_DAYS || "30") * 24 * 60 * 60);
 
 export interface DedupResult {
   unseen: OpportunityItem[];

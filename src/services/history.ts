@@ -2,6 +2,9 @@ import { Env, OpportunityItem } from "../types";
 
 const DATES_INDEX_KEY = "history:dates_index";
 
+// Daily history TTL in days; configurable via HISTORY_TTL_DAYS env var (default: 60 days).
+const HISTORY_TTL_DAYS = parseInt(process.env.HISTORY_TTL_DAYS || "60");
+
 function getTodayString(): string {
   const d = new Date();
   return d.toISOString().split("T")[0]; // YYYY-MM-DD
@@ -28,7 +31,7 @@ export async function saveDailyOpportunities(env: Env, items: OpportunityItem[])
     items.forEach(item => map.set(item.dedupeKey || item.id, item));
 
     await env.RADAR_HISTORY.put(dayKey, JSON.stringify(Array.from(map.values())), {
-      expirationTtl: 60 * 24 * 60 * 60
+      expirationTtl: HISTORY_TTL_DAYS * 24 * 60 * 60
     });
 
     let dates: string[] = [];

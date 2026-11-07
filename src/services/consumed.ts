@@ -1,7 +1,8 @@
 import { Env, OpportunityItem } from "../types";
 
 const CONSUMED_INDEX_KEY = "consumed:index";
-const NINETY_DAYS_SECONDS = 90 * 24 * 60 * 60;
+// Consumed items expire after 90 days; configurable via CONSUMED_TTL_DAYS env var.
+export const NINETY_DAYS_SECONDS = (parseInt(process.env.CONSUMED_TTL_DAYS || "90") * 24 * 60 * 60);
 
 export interface ConsumedRecord {
   dedupeKey: string;
